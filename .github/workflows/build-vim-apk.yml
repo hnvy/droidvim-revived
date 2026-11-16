@@ -1,12 +1,17 @@
-# Builds Vim for Android (4 ABIs) with the NDK, rebuilds the Vim runtime
-# archives, drops both into the DroidVim tree and builds an installable APK.
+# Builds everything DroidVim runs on the device for 4 Android ABIs and
+# packages it into an installable APK:
 #
-# Runs on every push, or manually from the Actions tab ("Run workflow") with
-# options. The Vim binaries and runtime archives are always uploaded as
-# artifacts. The APK needs the full DroidVim tree (upstream's `build` branch):
-# this workflow only replaces Vim itself (libvim.default.so, libxxd.so and
-# the runtime* archives); resources, bash, grep, diff, ctags, scripts, etc.
-# are taken from the repository as-is.
+# - Vim and xxd (latest patched Vim source, NDK, static deps) + runtime files
+# - grep, diff (GNU) and Universal Ctags, built the same way
+# - bash/readline/ncurses, zip/unzip, busybox, proot and termux-am, built
+#   with termux-packages for the app package name com.droidvim (the way
+#   DroidVim's original binaries were made) and repackaged by
+#   .github/droidvim-pack.py
+# - DroidVim's helper scripts from payload/scripts
+#
+# App resources (layouts, strings, DroidVim's settings archives) still come
+# from the repository; .github/check-payload.sh lists anything missing.
+# Runs on every push, or from the Actions tab ("Run workflow") with options.
 
 name: Build Vim for Android + DroidVim APK
 
@@ -40,6 +45,10 @@ on:
         description: Skip DroidVim patches that no longer apply instead of failing
         type: boolean
         default: false
+      termux_packages_ref:
+        description: termux-packages branch, tag or commit for bash, zip, busybox, proot, am
+        required: true
+        default: master
 
 permissions:
   contents: read
@@ -63,6 +72,12 @@ env:
   LUA_VERSION: '5.4.6'
   # Bump to throw away cached dependency builds.
   DEPS_CACHE_REV: '1'
+  # Command-line tools: 'latest' looks up the newest release at build time.
+  GREP_VERSION: latest
+  DIFFUTILS_VERSION: latest
+  CTAGS_VERSION: latest
+  TERMUX_PACKAGES_REF: ${{ inputs.termux_packages_ref || 'master' }}
+  DROIDVIM_PACKAGE: com.droidvim
 
 defaults:
   run:
@@ -84,7 +99,7 @@ jobs:
 
       - name: Check the DroidVim tree is complete
         working-directory: droidvim
-        run: bash .github/check-payload.sh || echo "::warning::The repository is missing DroidVim files (see the log of this step); Vim will still be built, but the APK job will fail."
+        run: bash .github/check-payload.sh || echo "::warning::The repository is missing DroidVim resources (see the log of this step); the binaries will still be built, but the APK job will fail."
 
       - name: Clone Vim
         run: |
@@ -377,12 +392,87 @@ jobs:
           make -j"$JOBS" vim
           make xxd/xxd
 
+      - name: Build grep, diffutils and Universal Ctags
+        run: |
+          set -euo pipefail
+          mkdir -p tools out-tools
+          cd tools
+          lf=()
+          if [ -n "$LARGEFILE_FLAG" ]; then lf=("$LARGEFILE_FLAG"); fi
+
+          fetch_gnu() {
+            local path=$1
+            for base in https://ftpmirror.gnu.org https://ftp.gnu.org/gnu; do
+              if curl -fsSL --retry 3 -o "$(basename "$path")" "$base/$path"; then return 0; fi
+              echo "Download from $base failed, trying next mirror"
+            done
+            return 1
+          }
+          latest_gnu() {  # latest_gnu <name> <fallback version>
+            local v
+            v=$(curl -fsSL --retry 3 "https://ftp.gnu.org/gnu/$1/" \
+                  | grep -oE "$1-[0-9]+(\.[0-9]+)+\.tar\.xz" \
+                  | sed -E "s/^$1-(.*)\.tar\.xz$/\1/" | sort -V | tail -1) || true
+            echo "${v:-$2}"
+          }
+
+          grep_v=$GREP_VERSION
+          if [ "$grep_v" = latest ]; then grep_v=$(latest_gnu grep 3.12); fi
+          diff_v=$DIFFUTILS_VERSION
+          if [ "$diff_v" = latest ]; then diff_v=$(latest_gnu diffutils 3.12); fi
+          ctags_v=$CTAGS_VERSION
+          if [ "$ctags_v" = latest ]; then
+            ctags_v=$(git ls-remote --tags --refs https://github.com/universal-ctags/ctags.git 'v*' \
+                        | sed 's#.*refs/tags/v##' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1) || true
+            ctags_v=${ctags_v:-6.2.1}
+          fi
+          echo "::notice::$ABI: grep $grep_v, diffutils $diff_v, Universal Ctags $ctags_v"
+
+          echo "::group::grep $grep_v"
+          fetch_gnu "grep/grep-$grep_v.tar.xz"
+          tar -xJf "grep-$grep_v.tar.xz"
+          (
+            cd "grep-$grep_v"
+            ./configure --host="$HOST" --disable-nls --disable-perl-regexp "${lf[@]}" CFLAGS=-O2
+            make -C lib -j"$JOBS"
+            make -C src -j"$JOBS" grep
+          )
+          cp "grep-$grep_v/src/grep" ../out-tools/libgrep.so
+          echo "::endgroup::"
+
+          echo "::group::diffutils $diff_v"
+          fetch_gnu "diffutils/diffutils-$diff_v.tar.xz"
+          tar -xJf "diffutils-$diff_v.tar.xz"
+          (
+            cd "diffutils-$diff_v"
+            ./configure --host="$HOST" --disable-nls "${lf[@]}" CFLAGS=-O2
+            make -C lib -j"$JOBS"
+            make -C src -j"$JOBS" diff
+          )
+          cp "diffutils-$diff_v/src/diff" ../out-tools/libdiff.so
+          echo "::endgroup::"
+
+          echo "::group::Universal Ctags $ctags_v"
+          curl -fsSL --retry 3 -o ctags.tar.gz \
+            "https://github.com/universal-ctags/ctags/releases/download/v$ctags_v/universal-ctags-$ctags_v.tar.gz"
+          tar -xzf ctags.tar.gz
+          (
+            cd "universal-ctags-$ctags_v"
+            ./configure --host="$HOST" CC_FOR_BUILD=gcc CFLAGS=-O2 \
+              --disable-xml --disable-json --disable-yaml --disable-pcre2 \
+              --disable-seccomp --disable-iconv --disable-readcmd "${lf[@]}"
+            make -j"$JOBS" ctags
+          )
+          cp "universal-ctags-$ctags_v/ctags" ../out-tools/libctags.so
+          echo "::endgroup::"
+
       - name: Strip, check and collect binaries
         run: |
           set -euo pipefail
           mkdir -p out
           cp vim/src/vim out/libvim.default.so
           cp vim/src/xxd/xxd out/libxxd.so
+          cp out-tools/*.so out/
           "$STRIP" --strip-unneeded out/*.so
           file out/*.so
           for f in out/*.so; do
@@ -412,6 +502,7 @@ jobs:
           path: |
             vim/src/auto/config.log
             build/**/config.log
+            tools/**/config.log
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------
@@ -466,10 +557,119 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # 4. Put the new Vim into the DroidVim tree and build the APK.
+  # 4. bash, zip/unzip, busybox, proot and am with termux-packages, built for
+  #    the com.droidvim app directory, then repackaged in DroidVim's format.
+  #    These need Android 7.0 (API 24) or newer, like all Termux builds.
+  # ---------------------------------------------------------------------------
+  termux-payload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            termux_arch: aarch64
+            arch: arm64
+          - abi: armeabi-v7a
+            termux_arch: arm
+            arch: arm
+          - abi: x86_64
+            termux_arch: x86_64
+            arch: x86_64
+          - abi: x86
+            termux_arch: i686
+            arch: x86
+    env:
+      ABI: ${{ matrix.abi }}
+      TERMUX_ARCH: ${{ matrix.termux_arch }}
+      DV_ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: droidvim
+
+      - name: Fetch termux-packages
+        id: tp
+        run: |
+          set -euo pipefail
+          git init -q termux-packages
+          git -C termux-packages fetch -q --depth 1 https://github.com/termux/termux-packages.git "$TERMUX_PACKAGES_REF"
+          git -C termux-packages checkout -q FETCH_HEAD
+          sha=$(git -C termux-packages rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          git -C termux-packages log -1 --format='termux-packages %H (%cs)'
+
+      - name: Restore cached payload
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: payload-out
+          key: termux-payload-${{ matrix.abi }}-${{ steps.tp.outputs.sha }}-${{ env.DROIDVIM_PACKAGE }}-${{ hashFiles('droidvim/.github/droidvim-pack.py') }}
+
+      - name: Free disk space for the Termux build container
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          df -h /
+
+      - name: Build packages with termux-packages
+        if: steps.cache.outputs.cache-hit != 'true'
+        working-directory: termux-packages
+        run: |
+          set -euo pipefail
+          # Build everything for /data/data/com.droidvim/files/usr instead
+          # of Termux's own directory.
+          sed -i -E "s/^TERMUX_APP__PACKAGE_NAME=.*/TERMUX_APP__PACKAGE_NAME=\"$DROIDVIM_PACKAGE\"/" scripts/properties.sh
+          if ! grep -q "^TERMUX_APP__PACKAGE_NAME=\"$DROIDVIM_PACKAGE\"" scripts/properties.sh; then
+            echo "::error::Could not set the app package name in termux-packages' scripts/properties.sh"
+            exit 1
+          fi
+          ./scripts/run-docker.sh true
+
+          # -s: build exactly the listed packages, in order (the full
+          # dependency trees pull in far more than DroidVim needs).
+          build() { ./scripts/run-docker.sh ./build-package.sh -s -a "$TERMUX_ARCH" "$@"; }
+          optional() {  # optional <what> <packages...>
+            local what=$1; shift
+            if ! build "$@"; then
+              echo "::warning::$ABI: building $what failed; the APK will not include it"
+              echo "PARTIAL=true" >> "$GITHUB_ENV"
+            fi
+          }
+          build libandroid-support libiconv ncurses readline bash
+          optional "zip/unzip" libbz2 zip unzip
+          optional "busybox" pcre2 libandroid-selinux busybox
+          optional "proot" libtalloc libandroid-shmem proot
+          optional "am" termux-am
+          ls -l output
+
+      - name: Repackage for DroidVim
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          python3 droidvim/.github/droidvim-pack.py --debs termux-packages/output \
+            --abi "$ABI" --arch "$DV_ARCH" --package "$DROIDVIM_PACKAGE" --out payload-out
+          find payload-out -type f | sort
+
+      - name: Save payload to cache
+        if: steps.cache.outputs.cache-hit != 'true' && env.PARTIAL != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: payload-out
+          key: ${{ steps.cache.outputs.cache-primary-key }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: termux-payload-${{ matrix.abi }}
+          path: payload-out
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 5. Put everything into the DroidVim tree and build the APK.
   # ---------------------------------------------------------------------------
   apk:
-    needs: [prepare-source, vim-binary, vim-runtime]
+    needs: [prepare-source, vim-binary, vim-runtime, termux-payload]
     runs-on: ubuntu-latest
     env:
       VIM_VERSION: ${{ needs.prepare-source.outputs.vim_version }}
@@ -479,61 +679,127 @@ jobs:
       - name: Check the DroidVim tree is complete
         run: |
           if ! bash .github/check-payload.sh; then
-            echo "::error::Cannot build the APK: DroidVim resources/prebuilt files are missing from this repository (listed in the log). Copy them back from your full DroidVim checkout and push again. The Vim binaries and runtime of this run are available as the vim-android-* and vim-runtime artifacts."
+            echo "::error::Cannot build the APK: DroidVim resources are missing from this repository (listed in the log). Copy them back from your full DroidVim checkout and push again. The binaries of this run are available as the vim-android-*, vim-runtime and termux-payload-* artifacts."
             exit 1
           fi
 
       - uses: actions/download-artifact@v4
         with:
           pattern: vim-android-*
-          path: payload
+          path: dl
 
       - uses: actions/download-artifact@v4
         with:
           name: vim-runtime
-          path: payload/vim-runtime
+          path: dl/vim-runtime
 
-      - name: Install Vim into the DroidVim source tree
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: termux-payload-*
+          path: dl
+
+      - name: Install the built files into the DroidVim source tree
         run: |
           set -euo pipefail
+          shopt -s nullglob
+          abis=(arm64-v8a armeabi-v7a x86_64 x86)
+          # Source folders the droidvim flavor builds from (term/build.gradle).
+          lib_dirs=(main droidvim vim term-bash cmd-tools zip unzip proot)
+          res_dirs=(main droidvim vim)
 
-          # Replace a library wherever the repo already has it (two copies of
-          # the same lib in different jniLibs dirs would break the build);
-          # otherwise add it to the vim flavor's jniLibs.
+          # put_lib <file> <abi> <name> <dir>: replace the library wherever the
+          # droidvim flavor already has it (two copies in different jniLibs
+          # folders would break the build), otherwise add it to term/src/<dir>.
           put_lib() {
-            local src=$1 abi=$2 name=$3 hits=()
-            mapfile -t hits < <(find term/src -type f -path "*/jniLibs/$abi/$name")
-            if [ ${#hits[@]} -gt 0 ]; then
-              for h in "${hits[@]}"; do cp "$src" "$h"; echo "Replaced $h"; done
-            else
-              mkdir -p "term/src/vim/jniLibs/$abi"
-              cp "$src" "term/src/vim/jniLibs/$abi/$name"
-              echo "::warning::$name for $abi was not in the repo; added term/src/vim/jniLibs/$abi/$name"
+            local src=$1 abi=$2 name=$3 dir=$4 hits=() d
+            for d in "${lib_dirs[@]}"; do
+              if [ -f "term/src/$d/jniLibs/$abi/$name" ]; then hits+=("term/src/$d/jniLibs/$abi/$name"); fi
+            done
+            if [ ${#hits[@]} -eq 0 ]; then
+              mkdir -p "term/src/$dir/jniLibs/$abi"
+              hits=("term/src/$dir/jniLibs/$abi/$name")
             fi
+            for h in "${hits[@]}"; do cp "$src" "$h"; done
           }
-          for dir in payload/vim-android-*; do
-            abi=${dir#payload/vim-android-}
-            put_lib "$dir/libvim.default.so" "$abi" libvim.default.so
-            put_lib "$dir/libxxd.so" "$abi" libxxd.so
-          done
-
-          # Raw resources are matched by name without extension, keeping
-          # whatever file name the repo already uses.
-          for name in runtime runtimelang runtimespell runtimesyntax runtimedoc runtimetutor; do
-            hits=()
-            while IFS= read -r -d '' f; do
-              base=$(basename "$f")
-              if [ "${base%%.*}" = "$name" ]; then hits+=("$f"); fi
-            done < <(find term/src -type f -path '*/res/raw/*' -print0)
-            if [ ${#hits[@]} -gt 0 ]; then
-              for h in "${hits[@]}"; do cp "payload/vim-runtime/$name" "$h"; echo "Replaced $h"; done
-            else
-              mkdir -p term/src/vim/res/raw
-              cp "payload/vim-runtime/$name" "term/src/vim/res/raw/$name"
-              echo "::warning::Raw resource $name was not in the repo; added term/src/vim/res/raw/$name"
+          # put_raw <file> <name> <dir>: raw resources are matched by name
+          # without extension, keeping the file name the repo already uses.
+          put_raw() {
+            local src=$1 name=$2 dir=$3 hits=() f base d
+            for d in "${res_dirs[@]}"; do
+              for f in "term/src/$d/res/raw/"*; do
+                base=$(basename "$f")
+                if [ "${base%%.*}" = "$name" ]; then hits+=("$f"); fi
+              done
+            done
+            if [ ${#hits[@]} -eq 0 ]; then
+              mkdir -p "term/src/$dir/res/raw"
+              hits=("term/src/$dir/res/raw/$name")
             fi
-          done
+            for h in "${hits[@]}"; do cp "$src" "$h"; done
+          }
 
+          echo "::group::Vim, xxd, grep, diff, ctags"
+          for dir in dl/vim-android-*; do
+            abi=${dir#dl/vim-android-}
+            put_lib "$dir/libvim.default.so" "$abi" libvim.default.so vim
+            put_lib "$dir/libxxd.so" "$abi" libxxd.so vim
+            for tool in libgrep.so libdiff.so libctags.so; do
+              put_lib "$dir/$tool" "$abi" "$tool" cmd-tools
+            done
+            echo "$abi done"
+          done
+          echo "::endgroup::"
+
+          echo "::group::Vim runtime"
+          for name in runtime runtimelang runtimespell runtimesyntax runtimedoc runtimetutor; do
+            put_raw "dl/vim-runtime/$name" "$name" vim
+          done
+          echo "::endgroup::"
+
+          echo "::group::Termux-built tools"
+          for dir in dl/termux-payload-*; do
+            abi=${dir#dl/termux-payload-}
+            # Replace each bundle as a whole; the number of files changes
+            # between versions.
+            for bdir in "$dir"/bundles/*; do
+              bundle=$(basename "$bdir")
+              for d in "${lib_dirs[@]}"; do
+                rm -f "term/src/$d/jniLibs/$abi/lib$bundle.tar.so" \
+                      "term/src/$d/jniLibs/$abi/lib$bundle"[0-9][0-9][0-9][0-9][0-9].so
+              done
+              mkdir -p "term/src/$bundle/jniLibs/$abi"
+              cp "$bdir/$abi"/* "term/src/$bundle/jniLibs/$abi/"
+              echo "$abi: $bundle ($(find "$bdir/$abi" -type f | wc -l) files)"
+            done
+            for f in "$dir"/libs/*/"$abi"/*; do
+              src_dir=$(basename "$(dirname "$(dirname "$f")")")
+              put_lib "$f" "$abi" "$(basename "$f")" "$src_dir"
+              echo "$abi: $(basename "$f")"
+            done
+            for f in "$dir"/raw/*; do
+              put_raw "$f" "$(basename "$f")" main
+            done
+          done
+          # The app re-installs the shell tools when this stamp changes.
+          date -u '+%Y/%m/%d %H:%M:%S' > version_bash.tmp
+          put_raw version_bash.tmp version_bash main
+          rm version_bash.tmp
+          echo "::endgroup::"
+
+          echo "::group::Helper scripts"
+          for f in payload/scripts/*/lib*.so; do
+            dir=$(basename "$(dirname "$f")")
+            for abi in "${abis[@]}"; do
+              put_lib "$f" "$abi" "$(basename "$f")" "$dir"
+            done
+            echo "$dir/$(basename "$f")"
+          done
+          echo "::endgroup::"
+
+          echo "Native libraries per ABI:"
+          for abi in "${abis[@]}"; do
+            echo "  $abi: $(find term/src -path "*/jniLibs/$abi/*.so" -type f | wc -l)"
+          done
 
       - name: Tag the app version with the Vim version
         run: |

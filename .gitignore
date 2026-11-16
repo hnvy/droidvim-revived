@@ -58,3 +58,7 @@ captures/
 *~
 *.swp
 
+
+# DroidVim ships its scripts and prebuilt programs as lib*.so files; keep a
+# global "*.so" ignore rule from dropping them.
+!*.so

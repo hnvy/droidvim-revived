@@ -1,0 +1,11 @@
+#!/system/bin/sh
+# am replacement (termux-am), built by build-vim-apk.yml as libam.apk.so.
+AM_APK_PATH=$APPFILES/bin/am.apk
+# Android 14+ refuses writable dex files; the APK is normally a symlink to
+# the read-only native library directory, but may be a copy.
+if [ -w "$AM_APK_PATH" ]; then
+  chmod 0400 "$AM_APK_PATH"
+fi
+export CLASSPATH=$AM_APK_PATH
+unset LD_LIBRARY_PATH LD_PRELOAD
+exec /system/bin/app_process -Xnoimage-dex2oat / com.termux.termuxam.Am "$@"
