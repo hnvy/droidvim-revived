@@ -94,8 +94,10 @@ env:
   LIBICONV_VERSION: '1.17'
   GETTEXT_VERSION: '0.22.5'
   LUA_VERSION: '5.4.6'
-  # Bump to throw away cached dependency builds.
-  DEPS_CACHE_REV: '1'
+  # Bump to throw away cached dependency builds (needed whenever the way a
+  # dependency is compiled changes, since the cache key only covers versions
+  # and options).
+  DEPS_CACHE_REV: '2'
   # Command-line tools: 'latest' looks up the newest release at build time.
   GREP_VERSION: latest
   DIFFUTILS_VERSION: latest
@@ -378,8 +380,18 @@ jobs:
             echo "::group::Lua $LUA_VERSION"
             curl -fsSL --retry 3 -o "lua-$LUA_VERSION.tar.gz" "https://www.lua.org/ftp/lua-$LUA_VERSION.tar.gz"
             tar -xzf "lua-$LUA_VERSION.tar.gz"
+            lua_cflags="-O2 -fPIC -DLUA_COMPAT_5_3 -DLUA_USE_LINUX"
+            # Lua has no configure script, so --disable-largefile can't reach
+            # it. Its lprefix.h sets _FILE_OFFSET_BITS=64 unless the macro is
+            # already defined, and on 32-bit ABIs that makes bionic map
+            # fseeko/ftello to fseeko64/ftello64, which only exist from API 24.
+            # Defining it as 32 keeps the plain fseeko/ftello, like the other
+            # libraries and Vim built with --disable-largefile.
+            if [ -n "$LARGEFILE_FLAG" ]; then
+              lua_cflags+=" -D_FILE_OFFSET_BITS=32"
+            fi
             make -C "lua-$LUA_VERSION/src" -j"$JOBS" liblua.a \
-              CC="$CC" CFLAGS="-O2 -fPIC -DLUA_COMPAT_5_3 -DLUA_USE_LINUX" \
+              CC="$CC" CFLAGS="$lua_cflags" \
               AR="$AR rc" RANLIB="$RANLIB"
             mkdir -p "$PREFIX/include" "$PREFIX/lib"
             cp "lua-$LUA_VERSION/src/"{lua.h,luaconf.h,lualib.h,lauxlib.h,lua.hpp} "$PREFIX/include/"
