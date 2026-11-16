@@ -1,0 +1,8 @@
+vim.default $@
+if [ $? -ne 0 ]; then
+  echo -n -e '\e[9998t'
+  exit
+else
+  echo -n -e '\e[999t'
+fi
+
