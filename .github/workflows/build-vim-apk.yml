@@ -497,12 +497,18 @@ jobs:
           fi
           echo "::notice::$ABI: grep $grep_v, diffutils $diff_v, Universal Ctags $ctags_v"
 
+          # Answers for gnulib checks that can't run when cross-compiling.
+          # The gnulib in grep/diffutils 3.12 (April 2025) predates the fixes
+          # that let these two checks guess instead of failing. Both are true
+          # for Android's libc.
+          gl_cross=(gl_cv_func_strcasecmp_works=yes gl_cv_func_newlocale_works=yes)
+
           echo "::group::grep $grep_v"
           fetch_gnu "grep/grep-$grep_v.tar.xz"
           tar -xJf "grep-$grep_v.tar.xz"
           (
             cd "grep-$grep_v"
-            ./configure --host="$HOST" --disable-nls --disable-perl-regexp "${lf[@]}" CFLAGS=-O2
+            ./configure --host="$HOST" --disable-nls --disable-perl-regexp "${lf[@]}" CFLAGS=-O2 "${gl_cross[@]}"
             make -C lib -j"$JOBS"
             make -C src -j"$JOBS" grep
           )
@@ -514,7 +520,7 @@ jobs:
           tar -xJf "diffutils-$diff_v.tar.xz"
           (
             cd "diffutils-$diff_v"
-            ./configure --host="$HOST" --disable-nls "${lf[@]}" CFLAGS=-O2
+            ./configure --host="$HOST" --disable-nls "${lf[@]}" CFLAGS=-O2 "${gl_cross[@]}"
             make -C lib -j"$JOBS"
             make -C src -j"$JOBS" diff
           )
@@ -529,7 +535,7 @@ jobs:
             cd "universal-ctags-$ctags_v"
             ./configure --host="$HOST" CC_FOR_BUILD=gcc CFLAGS=-O2 \
               --disable-xml --disable-json --disable-yaml --disable-pcre2 \
-              --disable-seccomp --disable-iconv --disable-readcmd "${lf[@]}"
+              --disable-seccomp --disable-iconv --disable-readcmd "${lf[@]}" "${gl_cross[@]}"
             make -j"$JOBS" ctags
           )
           cp "universal-ctags-$ctags_v/ctags" ../out-tools/libctags.so
@@ -698,19 +704,32 @@ jobs:
           fi
 
           # Trim recipes to what DroidVim needs, so termux-packages can
-          # build each package's dependencies itself:
+          # build each package's dependencies itself without pulling in far
+          # more than that.
           # - bash: termux-tools is Termux's app scripts (and pulls in
           #   coreutils, curl, util-linux, ...), not needed here.
-          # - python: Tkinter would need Tk and X11, which DroidVim lacks.
           sed -i -E '/^TERMUX_PKG_DEPENDS=/ s/, *termux-tools( *\([^)]*\))?//' packages/bash/build.sh
           if grep -E '^TERMUX_PKG_DEPENDS=' packages/bash/build.sh | grep -q termux-tools; then
             echo "::error::Could not remove termux-tools from packages/bash/build.sh (termux-packages changed?)"
             exit 1
           fi
+          # - Sub-packages DroidVim doesn't ship (Python's Tkinter, git's GUIs
+          #   and svn bridge): Termux builds their dependencies together with
+          #   the parent package (Tk + X11, Subversion + Perl). Keep the files,
+          #   since other recipes refer to these sub-packages, but drop their
+          #   dependencies.
+          for f in packages/python/python-tkinter.subpackage.sh \
+                   packages/git/git-gui.subpackage.sh \
+                   packages/git/git-gitk.subpackage.sh \
+                   packages/git/git-svn.subpackage.sh; do
+            if [ -f "$f" ]; then
+              sed -i -E 's/^TERMUX_SUBPKG_DEPENDS=.*/TERMUX_SUBPKG_DEPENDS=""/' "$f"
+            fi
+          done
+          # - python: Tkinter would need Tk and X11, which DroidVim lacks.
           if [ "$WITH_PYTHON" = true ]; then
             sed -i -E '/^TERMUX_PKG_BUILD_DEPENDS=/ { s/, *tk *,/,/; s/"tk *, */"/; s/, *tk"/"/; s/"tk"/""/ }' packages/python/build.sh
             sed -i -E 's/ _tkinter / /' packages/python/build.sh
-            rm -f packages/python/python-tkinter.subpackage.sh
             if grep -qE '^TERMUX_PKG_BUILD_DEPENDS=.*\btk\b| _tkinter ' packages/python/build.sh; then
               echo "::error::Could not remove Tkinter from packages/python/build.sh (termux-packages changed?)"
               exit 1
