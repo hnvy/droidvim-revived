@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          xmlns:tools="http://schemas.android.com/tools" >
+    <uses-permission android:name="android.permission.BATTERY_STATS" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <uses-permission android:name="android.permission.CHANGE_CONFIGURATION" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <uses-permission android:name="android.permission.DUMP" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <uses-permission android:name="android.permission.GET_APP_OPS_STATS" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <uses-permission android:name="android.permission.INTERACT_ACROSS_USERS" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_LOGS" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <uses-permission android:name="android.permission.SET_DEBUG_APP" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <uses-permission android:name="android.permission.SIGNAL_PERSISTENT_PROCESSES" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" tools:node="remove" />
+    <application
+        android:label="@string/application_term_app"
+        android:extractNativeLibs="true"
+        tools:replace="android:label">
+        <provider
+            android:name="com.droidvim.storage.LocalStorageProvider"
+            android:authorities="com.droidvim.storage.documents"
+            android:grantUriPermissions="true"
+            android:exported="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.droidvim.fileprovider"
+            android:exported="false"
+            android:permission="android.permission.MANAGE_DOCUMENTS"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/paths"/>
+        </provider>
+    </application>
+</manifest>

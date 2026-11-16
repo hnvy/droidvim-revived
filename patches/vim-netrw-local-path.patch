@@ -1,0 +1,51 @@
+diff --git a/runtime/pack/dist/opt/netrw/autoload/netrw/os.vim b/runtime/pack/dist/opt/netrw/autoload/netrw/os.vim
+index 455ea5a..1838465 100644
+--- a/runtime/pack/dist/opt/netrw/autoload/netrw/os.vim
++++ b/runtime/pack/dist/opt/netrw/autoload/netrw/os.vim
+@@ -14,6 +14,10 @@ function! netrw#os#Execute(cmd)
+         finally
+             let [&shell,&shellcmdflag,&shellxquote,&shellxescape,&shellquote,&shellpipe,&shellredir,&shellslash] = savedShell
+         endtry
++    elseif exists('$APPBASE')
++        " DroidVim: make relative paths in the command absolute, relative to
++        " the directory of the current file.
++        execute s:CnvLocalPath2Uri(a:cmd)
+     else
+         execute a:cmd
+     endif
+@@ -23,6 +27,35 @@ function! netrw#os#Execute(cmd)
+     endif
+ endfunction
+ 
++function! s:CnvLocalPath2Uri(str)
++    let str = a:str
++    let pathhead = '\.\.\?[/\\]\([./\\]*\)*'
++    let prevPath = s:EscapePath(getcwd(), ' ')
++    exe 'chdir ' . s:EscapePath(fnamemodify(expand('%'), ':h'), ' ')
++    while match(str, "[\"']" . pathhead) != -1
++        let uri = matchstr(str, pathhead)
++        let uri = s:NormalizePath(fnamemodify(uri, ':p'))
++        let str = substitute(str, pathhead, 'file://' . uri, '')
++        let str = substitute(str, 'file:///', 'file://' . fnamemodify('/', ':p'), 'g')
++        let str = substitute(str, 'file://', '', 'g')
++    endwhile
++    silent! exe 'chdir ' . prevPath
++    return str
++endfunction
++
++function! s:EscapePath(str, chars)
++    return escape(a:str, a:chars . (has('win32') ? '#%&' : '#%$'))
++endfunction
++
++function! s:NormalizePath(path)
++    let path = a:path
++    if has('win32')
++        let path = substitute(path, '^\([a-z]\):', '\u\1:', '')
++        let path = substitute(path, '\\', '/', 'g')
++    endif
++    return path
++endfunction
++
+ " }}}
+ " netrw#os#Escape: shellescape(), or special windows handling {{{
+ 

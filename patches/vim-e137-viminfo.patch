@@ -1,0 +1,13 @@
+diff --git a/src/viminfo.c b/src/viminfo.c
+index bb84726..a59c40a 100644
+--- a/src/viminfo.c
++++ b/src/viminfo.c
+@@ -3151,7 +3151,7 @@ write_viminfo(char_u *file, int forceit)
+ 	// successful.
+ 	if (mch_fstat(fileno(fp_in), &st_old) < 0
+ 		|| S_ISDIR(st_old.st_mode)
+-#ifdef UNIX
++#if defined(UNIX) && !defined(__ANDROID__)
+ 		// For Unix we check the owner of the file.  It's not very nice
+ 		// to overwrite a user's viminfo file after a "su root", with a
+ 		// viminfo file that the user can't read.

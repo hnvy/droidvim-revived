@@ -1,0 +1,586 @@
+# Builds Vim for Android (4 ABIs) with the NDK, rebuilds the Vim runtime
+# archives, drops both into the DroidVim tree and builds an installable APK.
+#
+# Runs on every push, or manually from the Actions tab ("Run workflow") with
+# options. The Vim binaries and runtime archives are always uploaded as
+# artifacts. The APK needs the full DroidVim tree (upstream's `build` branch):
+# this workflow only replaces Vim itself (libvim.default.so, libxxd.so and
+# the runtime* archives); resources, bash, grep, diff, ctags, scripts, etc.
+# are taken from the repository as-is.
+
+name: Build Vim for Android + DroidVim APK
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+    inputs:
+      vim_ref:
+        description: Vim tag, branch or commit to build (e.g. v9.2.0501)
+        required: true
+        default: v9.2.0501
+      android_api:
+        description: Minimum Android API level (keep equal to minSdk in build.gradle)
+        required: true
+        default: '21'
+      enable_nls:
+        description: Build with translations (+gettext; builds GNU libintl)
+        type: boolean
+        default: true
+      enable_lua:
+        description: Add the Lua interpreter (+lua; builds Lua statically)
+        type: boolean
+        default: false
+      extra_configure_flags:
+        description: Extra flags for Vim's configure (space separated)
+        required: false
+        default: ''
+      allow_patch_failures:
+        description: Skip DroidVim patches that no longer apply instead of failing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VIM_REPO: https://github.com/vim/vim.git
+  VIM_REF: ${{ inputs.vim_ref || 'v9.2.0501' }}
+  ANDROID_API: ${{ inputs.android_api || '21' }}
+  ENABLE_NLS: ${{ inputs.enable_nls != false }}
+  ENABLE_LUA: ${{ inputs.enable_lua == true }}
+  ALLOW_PATCH_FAILURES: ${{ inputs.allow_patch_failures == true }}
+  EXTRA_CONFIGURE_FLAGS: ${{ inputs.extra_configure_flags }}
+  NDK_VERSION: r26d
+  NCURSES_VERSION: '6.5'
+  LIBICONV_VERSION: '1.17'
+  GETTEXT_VERSION: '0.22.5'
+  LUA_VERSION: '5.4.6'
+  # Bump to throw away cached dependency builds.
+  DEPS_CACHE_REV: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 1. Fetch Vim and apply DroidVim's patches once, so every later job builds
+  #    exactly the same source.
+  # ---------------------------------------------------------------------------
+  prepare-source:
+    runs-on: ubuntu-latest
+    outputs:
+      vim_version: ${{ steps.version.outputs.vim_version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: droidvim
+
+      - name: Check the DroidVim tree is complete
+        working-directory: droidvim
+        run: bash .github/check-payload.sh || echo "::warning::The repository is missing DroidVim files (see the log of this step); Vim will still be built, but the APK job will fail."
+
+      - name: Clone Vim
+        run: |
+          set -euo pipefail
+          git clone --quiet --filter=tree:0 --no-checkout "$VIM_REPO" vim
+          git -C vim checkout --quiet "$VIM_REF"
+          git -C vim log -1 --format='Building Vim %H (%cs) %s'
+
+      - name: Apply DroidVim patches
+        run: |
+          set -euo pipefail
+          cd vim
+          failed=()
+          for patch in ../droidvim/patches/*.patch; do
+            name=$(basename "$patch")
+            if git apply --check "$patch" 2>/dev/null; then
+              git apply "$patch"
+              echo "Applied $name"
+              continue
+            fi
+            # The upstream E137 patch targets older viminfo.c; the same change
+            # (skip the Unix file-owner check on Android) is made here in a
+            # way that survives Vim's later refactoring of that function.
+            if [ "$name" = vim-e137-viminfo.patch ]; then
+              perl -0pi -e 's/^#ifdef UNIX\n(\s*\/\/ For Unix we check the owner of the file)/#if defined(UNIX) \&\& !defined(__ANDROID__)\n$1/m' src/viminfo.c
+              if grep -q 'defined(UNIX) && !defined(__ANDROID__)' src/viminfo.c; then
+                echo "Applied $name (ported to this Vim version)"
+                continue
+              fi
+            fi
+            failed+=("$name")
+          done
+          if [ ${#failed[@]} -gt 0 ]; then
+            for name in "${failed[@]}"; do
+              if [ "$ALLOW_PATCH_FAILURES" = true ]; then
+                echo "::warning::Patch $name does not apply to $VIM_REF and was skipped"
+              else
+                echo "::error::Patch $name does not apply to $VIM_REF (re-run with allow_patch_failures, or update the patch)"
+              fi
+            done
+            [ "$ALLOW_PATCH_FAILURES" = true ] || exit 1
+          fi
+          git diff > ../droidvim-applied.diff
+          git diff --stat
+
+      - name: Determine Vim version
+        id: version
+        run: |
+          set -euo pipefail
+          version=$(git -C vim describe --tags --always)
+          version=${version#v}
+          echo "vim_version=$version" >> "$GITHUB_OUTPUT"
+          echo "Vim version: $version"
+
+      - name: Pack patched source
+        run: tar --exclude=.git -czf vim-src.tar.gz vim droidvim-applied.diff
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vim-src
+          path: vim-src.tar.gz
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # 2. Cross-compile Vim (and xxd) for each Android ABI.
+  # ---------------------------------------------------------------------------
+  vim-binary:
+    needs: prepare-source
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            target: aarch64-linux-android
+            host: aarch64-linux-android
+            uname_m: aarch64
+          - abi: armeabi-v7a
+            target: armv7a-linux-androideabi
+            host: arm-linux-androideabi
+            uname_m: armv7l
+          - abi: x86_64
+            target: x86_64-linux-android
+            host: x86_64-linux-android
+            uname_m: x86_64
+          - abi: x86
+            target: i686-linux-android
+            host: i686-linux-android
+            uname_m: i686
+    env:
+      ABI: ${{ matrix.abi }}
+      TARGET: ${{ matrix.target }}
+      HOST: ${{ matrix.host }}
+      UNAME_M: ${{ matrix.uname_m }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vim-src
+
+      - name: Unpack source
+        run: tar -xzf vim-src.tar.gz
+
+      - name: Install host tools
+        run: sudo apt-get update -q && sudo apt-get install -y -q gettext pkg-config
+
+      - name: Set up Android NDK
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: ${{ env.NDK_VERSION }}
+          add-to-path: false
+
+      - name: Configure toolchain
+        env:
+          NDK: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          set -euo pipefail
+          tc="$NDK/toolchains/llvm/prebuilt/linux-x86_64"
+          {
+            echo "TOOLCHAIN=$tc"
+            echo "CC=$tc/bin/${TARGET}${ANDROID_API}-clang"
+            echo "AR=$tc/bin/llvm-ar"
+            echo "RANLIB=$tc/bin/llvm-ranlib"
+            echo "STRIP=$tc/bin/llvm-strip"
+            echo "READELF=$tc/bin/llvm-readelf"
+            echo "PREFIX=$GITHUB_WORKSPACE/deps/$ABI"
+            echo "JOBS=$(nproc)"
+            # 32-bit Android below API 24 lacks several 64-bit file offset
+            # functions, so build those ABIs without large-file support.
+            if { [ "$ABI" = armeabi-v7a ] || [ "$ABI" = x86 ]; } && [ "$ANDROID_API" -lt 24 ]; then
+              echo "LARGEFILE_FLAG=--disable-largefile"
+            else
+              echo "LARGEFILE_FLAG="
+            fi
+          } >> "$GITHUB_ENV"
+          "$tc/bin/${TARGET}${ANDROID_API}-clang" --version
+
+      - name: Restore cached dependencies
+        id: deps-cache
+        uses: actions/cache@v4
+        with:
+          path: deps/${{ matrix.abi }}
+          key: android-deps-${{ matrix.abi }}-api${{ env.ANDROID_API }}-ndk${{ env.NDK_VERSION }}-ncurses${{ env.NCURSES_VERSION }}-iconv${{ env.LIBICONV_VERSION }}-nls${{ env.ENABLE_NLS }}-gettext${{ env.GETTEXT_VERSION }}-lua${{ env.ENABLE_LUA }}-${{ env.LUA_VERSION }}-r${{ env.DEPS_CACHE_REV }}
+
+      - name: Build static dependencies (ncurses, libiconv, libintl, Lua)
+        if: steps.deps-cache.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p "$PREFIX" build
+          cd build
+          export CFLAGS="-O2 -fPIC"
+          lf=()
+          if [ -n "$LARGEFILE_FLAG" ]; then lf=("$LARGEFILE_FLAG"); fi
+
+          fetch_gnu() {
+            local path=$1
+            for base in https://ftpmirror.gnu.org https://ftp.gnu.org/gnu; do
+              if curl -fsSL --retry 3 -o "$(basename "$path")" "$base/$path"; then return 0; fi
+              echo "Download from $base failed, trying next mirror"
+            done
+            return 1
+          }
+
+          echo "::group::ncurses $NCURSES_VERSION"
+          fetch_gnu "ncurses/ncurses-$NCURSES_VERSION.tar.gz"
+          tar -xzf "ncurses-$NCURSES_VERSION.tar.gz"
+          (
+            cd "ncurses-$NCURSES_VERSION"
+            ./configure --host="$HOST" --prefix="$PREFIX" \
+              --with-build-cc=gcc \
+              --without-shared --with-normal --without-debug \
+              --without-cxx --without-cxx-binding --without-ada \
+              --without-manpages --without-progs --without-tests \
+              --enable-widec --enable-overwrite --enable-const \
+              --disable-db-install --disable-stripping \
+              --with-default-terminfo-dir=/data/data/com.droidvim/files/usr/share/terminfo \
+              "${lf[@]}"
+            make -j"$JOBS"
+            make install
+          )
+          echo "::endgroup::"
+
+          echo "::group::libiconv $LIBICONV_VERSION"
+          fetch_gnu "libiconv/libiconv-$LIBICONV_VERSION.tar.gz"
+          tar -xzf "libiconv-$LIBICONV_VERSION.tar.gz"
+          (
+            cd "libiconv-$LIBICONV_VERSION"
+            ./configure --host="$HOST" --prefix="$PREFIX" \
+              --disable-shared --enable-static --disable-nls "${lf[@]}"
+            make -j"$JOBS"
+            make install
+          )
+          echo "::endgroup::"
+
+          if [ "$ENABLE_NLS" = true ]; then
+            echo "::group::libintl (gettext $GETTEXT_VERSION)"
+            fetch_gnu "gettext/gettext-$GETTEXT_VERSION.tar.gz"
+            tar -xzf "gettext-$GETTEXT_VERSION.tar.gz"
+            (
+              cd "gettext-$GETTEXT_VERSION/gettext-runtime"
+              ./configure --host="$HOST" --prefix="$PREFIX" \
+                --disable-shared --enable-static \
+                --with-included-gettext --with-libiconv-prefix="$PREFIX" \
+                --disable-java --disable-csharp --disable-c++ \
+                --disable-libasprintf --disable-openmp --disable-curses \
+                --without-emacs --without-git "${lf[@]}"
+              # Only libintl is needed; fall back to the full build if the
+              # intl directory can't be built on its own.
+              if ! { make -C intl -j"$JOBS" && make -C intl install; }; then
+                echo "::warning::Building libintl alone failed; building all of gettext-runtime"
+                make -j"$JOBS"
+                make install
+              fi
+            )
+            test -f "$PREFIX/lib/libintl.a"
+            echo "::endgroup::"
+          fi
+
+          if [ "$ENABLE_LUA" = true ]; then
+            echo "::group::Lua $LUA_VERSION"
+            curl -fsSL --retry 3 -o "lua-$LUA_VERSION.tar.gz" "https://www.lua.org/ftp/lua-$LUA_VERSION.tar.gz"
+            tar -xzf "lua-$LUA_VERSION.tar.gz"
+            make -C "lua-$LUA_VERSION/src" -j"$JOBS" liblua.a \
+              CC="$CC" CFLAGS="-O2 -fPIC -DLUA_COMPAT_5_3 -DLUA_USE_LINUX" \
+              AR="$AR rc" RANLIB="$RANLIB"
+            mkdir -p "$PREFIX/include" "$PREFIX/lib"
+            cp "lua-$LUA_VERSION/src/"{lua.h,luaconf.h,lualib.h,lauxlib.h,lua.hpp} "$PREFIX/include/"
+            cp "lua-$LUA_VERSION/src/liblua.a" "$PREFIX/lib/"
+            echo "::endgroup::"
+          fi
+
+      - name: Configure Vim
+        working-directory: vim
+        run: |
+          set -euo pipefail
+          args=(
+            --host="$HOST"
+            --with-features=huge
+            --enable-gui=no --without-x --without-wayland --disable-socketserver
+            --enable-terminal --enable-channel --enable-multibyte --enable-cscope
+            --disable-gpm --disable-sysmouse --disable-libsodium --disable-canberra
+            --disable-selinux --disable-smack
+            --with-tlib=ncursesw
+            --with-compiledby="DroidVim GitHub Actions"
+          )
+          libs="-liconv"
+          if [ -n "$LARGEFILE_FLAG" ]; then args+=("$LARGEFILE_FLAG"); fi
+          if [ "$ENABLE_NLS" = true ]; then
+            args+=(--enable-nls)
+            libs="-lintl -liconv"
+          else
+            args+=(--disable-nls)
+          fi
+          if [ "$ENABLE_LUA" = true ]; then
+            args+=(--enable-luainterp=yes --with-lua-prefix="$PREFIX")
+          fi
+          if [ -n "$EXTRA_CONFIGURE_FLAGS" ]; then
+            read -r -a extra <<< "$EXTRA_CONFIGURE_FLAGS"
+            args+=("${extra[@]}")
+          fi
+
+          # Answers for the checks configure cannot run when cross-compiling.
+          export vim_cv_uname_output=Linux
+          export vim_cv_uname_r_output=4.14
+          export vim_cv_uname_m_output="$UNAME_M"
+          export vim_cv_toupper_broken=no
+          export vim_cv_terminfo=yes
+          export vim_cv_tgetent=zero
+          export vim_cv_getcwd_broken=no
+          export vim_cv_stat_ignores_slash=no
+          export vim_cv_memmove_handles_overlap=yes
+          export vim_cv_bcopy_handles_overlap=yes
+          export vim_cv_memcpy_handles_overlap=yes
+          export vim_cv_timer_create=yes
+          export vim_cv_timer_create_with_lrt=no
+          export vim_cv_timer_create_works=yes
+          # Keep pkg-config from picking up the build machine's libraries.
+          export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+
+          CFLAGS="-O2" \
+          CPPFLAGS="-I$PREFIX/include" \
+          LDFLAGS="-L$PREFIX/lib" \
+          LIBS="$libs" \
+            ./configure "${args[@]}"
+
+      - name: Build Vim and xxd
+        working-directory: vim/src
+        run: |
+          set -euo pipefail
+          make -j"$JOBS" vim
+          make xxd/xxd
+
+      - name: Strip, check and collect binaries
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          cp vim/src/vim out/libvim.default.so
+          cp vim/src/xxd/xxd out/libxxd.so
+          "$STRIP" --strip-unneeded out/*.so
+          file out/*.so
+          for f in out/*.so; do
+            needed=$("$READELF" -d "$f" | sed -n 's/.*Shared library: \[\(.*\)\].*/\1/p')
+            echo "$(basename "$f") needs: $(echo "$needed" | tr '\n' ' ')"
+            # Anything besides Android system libraries would have to be
+            # shipped separately, so treat it as a build error.
+            unexpected=$(echo "$needed" | grep -vE '^(libc|libm|libdl|liblog)\.so$' || true)
+            if [ -n "$unexpected" ]; then
+              echo "::error::$(basename "$f") links against non-system libraries: $unexpected"
+              exit 1
+            fi
+          done
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vim-android-${{ matrix.abi }}
+          path: out/*.so
+          if-no-files-found: error
+
+      - name: Upload build logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.abi }}
+          path: |
+            vim/src/auto/config.log
+            build/**/config.log
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # 3. Build the runtime files (syntax, docs + helptags, translations, ...)
+  #    natively from the same patched source and split them the way DroidVim
+  #    installs them.
+  # ---------------------------------------------------------------------------
+  vim-runtime:
+    needs: prepare-source
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: vim-src
+
+      - name: Unpack source
+        run: tar -xzf vim-src.tar.gz
+
+      - name: Install host build dependencies
+        run: sudo apt-get update -q && sudo apt-get install -y -q libncurses-dev gettext
+
+      - name: Build and install Vim into a staging directory
+        working-directory: vim
+        run: |
+          set -euo pipefail
+          ./configure --prefix=/usr --with-features=huge --enable-gui=no --without-x \
+            --without-wayland --disable-socketserver \
+            --enable-nls --with-tlib=ncurses --disable-gpm --disable-canberra --disable-libsodium
+          make -j"$(nproc)"
+          make install DESTDIR="$GITHUB_WORKSPACE/stage"
+
+      - name: Create runtime archives
+        run: |
+          set -euo pipefail
+          rtdirs=(stage/usr/share/vim/vim[0-9]*)
+          [ ${#rtdirs[@]} -eq 1 ] && [ -d "${rtdirs[0]}" ] || { echo "::error::Vim runtime directory not found"; exit 1; }
+          mkdir -p rt out
+          cp -a "${rtdirs[0]}" rt/runtime
+          tarxz() { tar --format=gnu --owner=0 --group=0 --numeric-owner -C rt -cJf "$@"; }
+          for sub in lang spell syntax doc tutor; do
+            tarxz "out/runtime$sub" "runtime/$sub"
+          done
+          tarxz out/runtime \
+            --exclude=runtime/lang --exclude=runtime/spell --exclude=runtime/syntax \
+            --exclude=runtime/doc --exclude=runtime/tutor runtime
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vim-runtime
+          path: out/*
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # 4. Put the new Vim into the DroidVim tree and build the APK.
+  # ---------------------------------------------------------------------------
+  apk:
+    needs: [prepare-source, vim-binary, vim-runtime]
+    runs-on: ubuntu-latest
+    env:
+      VIM_VERSION: ${{ needs.prepare-source.outputs.vim_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the DroidVim tree is complete
+        run: |
+          if ! bash .github/check-payload.sh; then
+            echo "::error::Cannot build the APK: DroidVim resources/prebuilt files are missing from this repository (listed in the log). Copy them back from your full DroidVim checkout and push again. The Vim binaries and runtime of this run are available as the vim-android-* and vim-runtime artifacts."
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: vim-android-*
+          path: payload
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: vim-runtime
+          path: payload/vim-runtime
+
+      - name: Install Vim into the DroidVim source tree
+        run: |
+          set -euo pipefail
+
+          # Replace a library wherever the repo already has it (two copies of
+          # the same lib in different jniLibs dirs would break the build);
+          # otherwise add it to the vim flavor's jniLibs.
+          put_lib() {
+            local src=$1 abi=$2 name=$3 hits=()
+            mapfile -t hits < <(find term/src -type f -path "*/jniLibs/$abi/$name")
+            if [ ${#hits[@]} -gt 0 ]; then
+              for h in "${hits[@]}"; do cp "$src" "$h"; echo "Replaced $h"; done
+            else
+              mkdir -p "term/src/vim/jniLibs/$abi"
+              cp "$src" "term/src/vim/jniLibs/$abi/$name"
+              echo "::warning::$name for $abi was not in the repo; added term/src/vim/jniLibs/$abi/$name"
+            fi
+          }
+          for dir in payload/vim-android-*; do
+            abi=${dir#payload/vim-android-}
+            put_lib "$dir/libvim.default.so" "$abi" libvim.default.so
+            put_lib "$dir/libxxd.so" "$abi" libxxd.so
+          done
+
+          # Raw resources are matched by name without extension, keeping
+          # whatever file name the repo already uses.
+          for name in runtime runtimelang runtimespell runtimesyntax runtimedoc runtimetutor; do
+            hits=()
+            while IFS= read -r -d '' f; do
+              base=$(basename "$f")
+              if [ "${base%%.*}" = "$name" ]; then hits+=("$f"); fi
+            done < <(find term/src -type f -path '*/res/raw/*' -print0)
+            if [ ${#hits[@]} -gt 0 ]; then
+              for h in "${hits[@]}"; do cp "payload/vim-runtime/$name" "$h"; echo "Replaced $h"; done
+            else
+              mkdir -p term/src/vim/res/raw
+              cp "payload/vim-runtime/$name" "term/src/vim/res/raw/$name"
+              echo "::warning::Raw resource $name was not in the repo; added term/src/vim/res/raw/$name"
+            fi
+          done
+
+
+      - name: Tag the app version with the Vim version
+        run: |
+          set -euo pipefail
+          # The installer re-extracts its files when versionName changes, so
+          # this makes an upgraded app install the new runtime.
+          perl -pi -e "s/('versionName'\s*:\s*')([^']*)'/\${1}\${2}-vim${VIM_VERSION}'/" build.gradle
+          grep -n "'versionName'" build.gradle
+          # Keep the in-app "what's new" text in sync with the Vim version.
+          perl -pi -e 's/(WHATS_NEW.*?\* Vim )[0-9]+(?:\.[0-9]+)*/${1}$ENV{VIM_VERSION}/' term/build.gradle
+          grep -n 'WHATS_NEW' term/build.gradle
+
+      - name: Set up signing key (if repository secrets exist)
+        env:
+          KEYSTORE: ${{ secrets.KEYSTORE }}
+        run: |
+          set -euo pipefail
+          if [ -n "$KEYSTORE" ]; then
+            mkdir -p term/keystore
+            echo "$KEYSTORE" | base64 -di > term/keystore/keystore_droidvim.jks
+            echo "BUILD_TYPE=release" >> "$GITHUB_ENV"
+            echo "Building a signed release APK"
+          else
+            echo "BUILD_TYPE=debug" >> "$GITHUB_ENV"
+            echo "::notice::No KEYSTORE secret; building a debug-signed APK"
+          fi
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          cache: gradle
+
+      - name: Build APK
+        env:
+          SIGNING_KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          task="assembleDroidvim${BUILD_TYPE^}"
+          ./gradlew --no-daemon "$task"
+          find term/build/outputs/apk -name '*.apk' -exec ls -l {} +
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DroidVim-vim${{ env.VIM_VERSION }}-${{ env.BUILD_TYPE }}
+          path: term/build/outputs/apk/droidvim/**/*.apk
+          if-no-files-found: error

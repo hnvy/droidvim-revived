@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="title_menu">Menu</string>
+    <string name="title_functionbar_fixed_esc">Esc (Fixed)</string>
+    <string name="title_functionbar_fixed_ctrl">Ctrl (Fixed)</string>
+    <string name="title_functionbar_fixed_alt">Alt (Fixed)</string>
+    <string name="title_functionbar_fixed_tab">Tab (Fixed)</string>
+    <string name="title_functionbar_fixed_colon">:  (Fixed)</string>
+    <string name="title_functionbar_menu">≡ - Menu</string>
+    <string name="title_functionbar_vim_yank">&quot;*yy - Vim yank command</string>
+    <string name="title_functionbar_vim_paste">&quot;*p - Vim paste command</string>
+    <string name="title_functionbar_ime_toggle">"✏" - Toggle keyboard</string>
+    <string name="title_functionbar_softkeyboard">"🔤"</string>
+    <string name="title_functionbar_quit">"📲" - Quit</string>
+    <string name="title_navigationbar_fn_toggle">"➖" - Toggle function bar</string>
+    <string name="title_functionbar_open_file">"📁" - Open File</string>
+    <string name="title_functionbar_new_file">"📝" - Create File</string>
+    <string name="title_functionbar_filemanager">"🗄" - File manager</string>
+    <string name="title_functionbar_voice_input">"🎤" - Voice input</string>
+    <string name="title_functionbar_hide">▽ - Hide this function bar</string>
+    <string name="title_functionbar_change">∧ - F1-F12</string>
+    <string name="title_functionbar_change_fkey">∨ - Hide F1-F12</string>
+    <string name="title_functionbar_backspace">"🔙" - Backspace</string>
+    <string name="title_functionbar_page_up">"🔼" - Page Up</string>
+    <string name="title_functionbar_page_down">"🔽" - Page Down</string>
+    <string name="title_functionbar_enter">"↲" - Enter</string>
+
+    <string name="string_functionbar_quit">"📲"</string>
+    <string name="string_functionbar_dia">"🔤"</string>
+    <string name="string_functionbar_enter">"↲"</string>
+    <string name="string_functionbar_open_file">"📁"</string>
+    <string name="string_functionbar_new_file">"📝"</string>
+    <string name="string_functionbar_filemanager">"🗄"</string>
+    <string name="string_functionbar_ime_toggle">"✏"</string>
+    <string name="string_functionbar_voice_input">"🎤"</string>
+    <string name="string_functionbar_fn_toggle">"➖"</string>
+    <string name="string_functionbar_fn_up">∧</string>
+    <string name="string_functionbar_fn_down">∨</string>
+    <string name="string_functionbar_up">▲</string>
+    <string name="string_functionbar_down">▼</string>
+    <string name="string_functionbar_left">◀</string>
+    <string name="string_functionbar_right">▶</string>
+    <string name="string_functionbar_clear">×</string>
+    <string name="string_functionbar_backspace">"🔙"</string>
+    <string name="string_functionbar_page_up">"🔼"</string>
+    <string name="string_functionbar_page_down">"🔽"</string>
+    <string name="string_functionbar_invert">"◯"</string>
+    <string name="string_functionbar_menu_user">"□"</string>
+</resources>

@@ -1,0 +1,158 @@
+apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
+
+android {
+    compileSdkVersion versions.compileSdk
+
+    defaultConfig {
+        minSdkVersion versions.minSdk
+        targetSdkVersion versions.targetSdk
+        buildConfigField "String", "TARGET_SDK", String.format('"%s"', versions.targetSdk)
+        multiDexEnabled true
+    }
+
+    defaultConfig {
+        versionName versions.versionName
+        versionCode versions.versionCode
+
+        //* Vim 9.1.0374.
+        //* Add MANAGE_EXTERNAL_STORAGE permission.
+        //  Direct access to internal storage is now possible even with Android 11 or later.
+        buildConfigField "String", "WHATS_NEW", '"* Vim 9.1.0374.\\n* Add MANAGE_EXTERNAL_STORAGE permission.\\n  Direct access to internal storage is now possible even with Android 11 or later."'
+        buildConfigField "String", "BASE64_PUBLIC_KEY", String.format('"%s"', file('base64-public-key.txt').getText().replaceAll("[\r\n].*", ""))
+    }
+
+    defaultConfig {
+        externalNativeBuild {
+            ndkBuild {
+                arguments '-C', 'src/main', '-j', Runtime.runtime.availableProcessors() + ''
+                if (abiArm) abiFilters 'arm64-v8a', 'armeabi-v7a'
+                if (abiX86) abiFilters 'x86_64', 'x86'
+            }
+        }
+
+        vectorDrawables.useSupportLibrary = true
+    }
+
+    signingConfigs {
+        release {
+            storeFile = file("keystore/keystore_droidvim.jks")
+            storePassword System.getenv("SIGNING_STORE_PASSWORD")
+            keyAlias System.getenv("SIGNING_KEY_ALIAS")
+            keyPassword System.getenv("SIGNING_KEY_PASSWORD")
+        }
+    }
+
+    externalNativeBuild {
+        ndkBuild {
+            path 'src/main/jni/Android.mk'
+        }
+    }
+
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility = versions.sourceCompatibility
+        targetCompatibility = versions.targetCompatibility
+    }
+
+    kotlinOptions {
+        jvmTarget = versions.jvmTarget
+    }
+
+    buildFeatures {
+        viewBinding true
+        buildConfig true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            ndk {
+                debugSymbolLevel 'SYMBOL_TABLE'
+            }
+            signingConfig signingConfigs.release
+        }
+    }
+
+    splits {
+        abi {
+            enable abiSplits
+            reset()
+            if (abiArm) include 'arm64-v8a', 'armeabi-v7a'
+            if (abiX86) include 'x86_64', 'x86'
+            universalApk buildUniversalApk
+        }
+    }
+
+    flavorDimensions = ["appType"]
+    productFlavors {
+        terminal {
+            dimension "appType"
+        }
+        droidvim {
+            dimension "appType"
+            applicationId "com.droidvim"
+        }
+    }
+
+    sourceSets {
+        terminal {
+            res.srcDirs += ['src/terminal-res/res']
+            jniLibs.srcDirs += ['src/term-bash/jniLibs', 'src/cmd-tools/jniLibs']
+            jniLibs.srcDirs += ['src/zip/jniLibs', 'src/unzip/jniLibs']
+            jniLibs.srcDirs += ['src/proot/jniLibs']
+        }
+        droidvim {
+            res.srcDirs += ['src/vim/res']
+            jniLibs.srcDirs += ['src/term-bash/jniLibs', 'src/cmd-tools/jniLibs']
+            jniLibs.srcDirs += ['src/zip/jniLibs', 'src/unzip/jniLibs']
+            jniLibs.srcDirs += ['src/proot/jniLibs']
+            jniLibs.srcDirs += ['src/vim/jniLibs']
+        }
+    }
+    namespace 'jackpal.androidterm'
+}
+
+dependencies {
+    implementation 'androidx.multidex:multidex:2.0.1'
+}
+
+dependencies {
+    implementation "androidx.core:core-ktx:${versions.core_ktx}"
+    implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:${versions.kotlin}"
+}
+
+// Libraries which can be re-used in other modules should use the `api` keyword.
+// This way they can be shared with dependent feature modules.
+dependencies {
+    api "androidx.annotation:annotation:${versions.annotation}"
+    api "androidx.appcompat:appcompat:${versions.appcompat}"
+    api "androidx.constraintlayout:constraintlayout:${versions.constraintlayout}"
+    api "androidx.core:core-ktx:${versions.core_ktx}"
+    api "androidx.documentfile:documentfile:${versions.documentfile}"
+    api "androidx.drawerlayout:drawerlayout:${versions.drawerlayout}"
+    api "androidx.fragment:fragment-ktx:${versions.fragment_ktx}"
+    api "androidx.preference:preference-ktx:${versions.preference}"
+    api "androidx.vectordrawable:vectordrawable:${versions.vectordrawable}"
+    api "androidx.webkit:webkit:${versions.webkit}"
+    api "com.google.android.material:material:${versions.material}"
+}
+
+dependencies {
+    implementation 'org.apache.commons:commons-compress:1.21'
+    implementation 'commons-io:commons-io:2.13.0'
+    implementation 'org.tukaani:xz:1.8'
+}
+
+dependencies {
+    implementation project(':emulatorview')
+    implementation project(':libtermexec')
+}
+
