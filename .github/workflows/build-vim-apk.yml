@@ -7,11 +7,18 @@
 #   with termux-packages for the app package name com.droidvim (the way
 #   DroidVim's original binaries were made) and repackaged by
 #   .github/droidvim-pack.py
+# - optionally git and Python (with pip), also from termux-packages
 # - DroidVim's helper scripts from payload/scripts
 #
+# Building grep/diff/ctags and the Termux tools is optional; when switched
+# off, the prebuilt copies already in the repository are used.
 # App resources (layouts, strings, DroidVim's settings archives) still come
 # from the repository; .github/check-payload.sh lists anything missing.
+#
 # Runs on every push, or from the Actions tab ("Run workflow") with options.
+# Defaults for push builds can be changed with repository variables
+# (Settings > Secrets and variables > Actions > Variables):
+#   BUILD_CMD_TOOLS, BUILD_TERMUX_TOOLS, WITH_GIT, WITH_PYTHON = true/false
 
 name: Build Vim for Android + DroidVim APK
 
@@ -45,8 +52,25 @@ on:
         description: Skip DroidVim patches that no longer apply instead of failing
         type: boolean
         default: false
+      build_cmd_tools:
+        description: Build grep, diff and ctags from source (off = use the repo's prebuilt ones)
+        type: boolean
+        default: true
+      build_termux_tools:
+        description: Build bash, zip, busybox, proot, am (+ git/python) with termux-packages (off = use the repo's prebuilt ones)
+        type: boolean
+        default: true
+      extra_tools:
+        description: Extra tools to include (needs the Termux tools build)
+        type: choice
+        options:
+          - git and python
+          - git
+          - python
+          - none
+        default: git and python
       termux_packages_ref:
-        description: termux-packages branch, tag or commit for bash, zip, busybox, proot, am
+        description: termux-packages branch, tag or commit for the Termux tools
         required: true
         default: master
 
@@ -78,6 +102,12 @@ env:
   CTAGS_VERSION: latest
   TERMUX_PACKAGES_REF: ${{ inputs.termux_packages_ref || 'master' }}
   DROIDVIM_PACKAGE: com.droidvim
+  # Optional parts: the Run workflow choice, else a repository variable,
+  # else on.
+  BUILD_CMD_TOOLS: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.build_cmd_tools) || vars.BUILD_CMD_TOOLS || 'true' }}
+  BUILD_TERMUX_TOOLS: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.build_termux_tools) || vars.BUILD_TERMUX_TOOLS || 'true' }}
+  WITH_GIT: ${{ github.event_name == 'workflow_dispatch' && format('{0}', contains(inputs.extra_tools, 'git')) || vars.WITH_GIT || 'true' }}
+  WITH_PYTHON: ${{ github.event_name == 'workflow_dispatch' && format('{0}', contains(inputs.extra_tools, 'python')) || vars.WITH_PYTHON || 'true' }}
 
 defaults:
   run:
@@ -92,7 +122,33 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       vim_version: ${{ steps.version.outputs.vim_version }}
+      build_termux_tools: ${{ steps.options.outputs.build_termux_tools }}
     steps:
+      - name: Build options
+        id: options
+        run: |
+          set -euo pipefail
+          for v in BUILD_CMD_TOOLS BUILD_TERMUX_TOOLS WITH_GIT WITH_PYTHON; do
+            case "${!v}" in
+              true|false) ;;
+              *) echo "::error::$v must be true or false, not '${!v}'"; exit 1;;
+            esac
+          done
+          echo "build_termux_tools=$BUILD_TERMUX_TOOLS" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Build options"
+            echo "| Part | Built from source |"
+            echo "| --- | --- |"
+            echo "| Vim $VIM_REF + runtime | always |"
+            echo "| grep, diff, ctags | $BUILD_CMD_TOOLS |"
+            echo "| bash, zip/unzip, busybox, proot, am | $BUILD_TERMUX_TOOLS |"
+            echo "| git | $([ "$BUILD_TERMUX_TOOLS" = true ] && echo "$WITH_GIT" || echo false) |"
+            echo "| Python 3 + pip | $([ "$BUILD_TERMUX_TOOLS" = true ] && echo "$WITH_PYTHON" || echo false) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$BUILD_TERMUX_TOOLS" != true ] && { [ "$WITH_GIT" = true ] || [ "$WITH_PYTHON" = true ]; }; then
+            echo "::notice::git and Python are only added when the Termux tools are built."
+          fi
+
       - uses: actions/checkout@v4
         with:
           path: droidvim
@@ -393,6 +449,7 @@ jobs:
           make xxd/xxd
 
       - name: Build grep, diffutils and Universal Ctags
+        if: env.BUILD_CMD_TOOLS == 'true'
         run: |
           set -euo pipefail
           mkdir -p tools out-tools
@@ -472,7 +529,7 @@ jobs:
           mkdir -p out
           cp vim/src/vim out/libvim.default.so
           cp vim/src/xxd/xxd out/libxxd.so
-          cp out-tools/*.so out/
+          if [ "$BUILD_CMD_TOOLS" = true ]; then cp out-tools/*.so out/; fi
           "$STRIP" --strip-unneeded out/*.so
           file out/*.so
           for f in out/*.so; do
@@ -562,8 +619,10 @@ jobs:
   #    These need Android 7.0 (API 24) or newer, like all Termux builds.
   # ---------------------------------------------------------------------------
   termux-payload:
+    needs: prepare-source
+    if: needs.prepare-source.outputs.build_termux_tools == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 240
+    timeout-minutes: 350
     strategy:
       fail-fast: false
       matrix:
@@ -605,12 +664,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: payload-out
-          key: termux-payload-${{ matrix.abi }}-${{ steps.tp.outputs.sha }}-${{ env.DROIDVIM_PACKAGE }}-${{ hashFiles('droidvim/.github/droidvim-pack.py') }}
+          key: termux-payload-${{ matrix.abi }}-${{ steps.tp.outputs.sha }}-${{ env.DROIDVIM_PACKAGE }}-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}-${{ hashFiles('droidvim/.github/droidvim-pack.py') }}
 
       - name: Free disk space for the Termux build container
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache /usr/local/share/boost /usr/local/.ghcup
           df -h /
 
       - name: Build packages with termux-packages
@@ -625,11 +684,29 @@ jobs:
             echo "::error::Could not set the app package name in termux-packages' scripts/properties.sh"
             exit 1
           fi
-          ./scripts/run-docker.sh true
 
-          # -s: build exactly the listed packages, in order (the full
-          # dependency trees pull in far more than DroidVim needs).
-          build() { ./scripts/run-docker.sh ./build-package.sh -s -a "$TERMUX_ARCH" "$@"; }
+          # Trim recipes to what DroidVim needs, so termux-packages can
+          # build each package's dependencies itself:
+          # - bash: termux-tools is Termux's app scripts (and pulls in
+          #   coreutils, curl, util-linux, ...), not needed here.
+          # - python: Tkinter would need Tk and X11, which DroidVim lacks.
+          sed -i -E '/^TERMUX_PKG_DEPENDS=/ s/, *termux-tools( *\([^)]*\))?//' packages/bash/build.sh
+          if grep -E '^TERMUX_PKG_DEPENDS=' packages/bash/build.sh | grep -q termux-tools; then
+            echo "::error::Could not remove termux-tools from packages/bash/build.sh (termux-packages changed?)"
+            exit 1
+          fi
+          if [ "$WITH_PYTHON" = true ]; then
+            sed -i -E '/^TERMUX_PKG_BUILD_DEPENDS=/ { s/, *tk *,/,/; s/"tk *, */"/; s/, *tk"/"/; s/"tk"/""/ }' packages/python/build.sh
+            sed -i -E 's/ _tkinter / /' packages/python/build.sh
+            rm -f packages/python/python-tkinter.subpackage.sh
+            if grep -qE '^TERMUX_PKG_BUILD_DEPENDS=.*\btk\b| _tkinter ' packages/python/build.sh; then
+              echo "::error::Could not remove Tkinter from packages/python/build.sh (termux-packages changed?)"
+              exit 1
+            fi
+          fi
+
+          ./scripts/run-docker.sh true
+          build() { ./scripts/run-docker.sh ./build-package.sh -a "$TERMUX_ARCH" "$@"; }
           optional() {  # optional <what> <packages...>
             local what=$1; shift
             if ! build "$@"; then
@@ -637,11 +714,16 @@ jobs:
               echo "PARTIAL=true" >> "$GITHUB_ENV"
             fi
           }
-          build libandroid-support libiconv ncurses readline bash
-          optional "zip/unzip" libbz2 zip unzip
-          optional "busybox" pcre2 libandroid-selinux busybox
-          optional "proot" libtalloc libandroid-shmem proot
+          build bash
+          optional "zip/unzip" zip unzip
+          optional "busybox" busybox
+          optional "proot" proot
           optional "am" termux-am
+          if [ "$WITH_GIT" = true ]; then optional "git" git; fi
+          if [ "$WITH_PYTHON" = true ]; then
+            optional "Python" python
+            optional "pip" python-pip
+          fi
           ls -l output
 
       - name: Repackage for DroidVim
@@ -670,6 +752,13 @@ jobs:
   # ---------------------------------------------------------------------------
   apk:
     needs: [prepare-source, vim-binary, vim-runtime, termux-payload]
+    # Runs when termux-payload was skipped (Termux tools not built) too.
+    if: >-
+      !cancelled() &&
+      needs.prepare-source.result == 'success' &&
+      needs.vim-binary.result == 'success' &&
+      needs.vim-runtime.result == 'success' &&
+      (needs.termux-payload.result == 'success' || needs.termux-payload.result == 'skipped')
     runs-on: ubuntu-latest
     env:
       VIM_VERSION: ${{ needs.prepare-source.outputs.vim_version }}
@@ -694,6 +783,7 @@ jobs:
           path: dl/vim-runtime
 
       - uses: actions/download-artifact@v4
+        if: env.BUILD_TERMUX_TOOLS == 'true'
         with:
           pattern: termux-payload-*
           path: dl
@@ -744,7 +834,7 @@ jobs:
             put_lib "$dir/libvim.default.so" "$abi" libvim.default.so vim
             put_lib "$dir/libxxd.so" "$abi" libxxd.so vim
             for tool in libgrep.so libdiff.so libctags.so; do
-              put_lib "$dir/$tool" "$abi" "$tool" cmd-tools
+              if [ -f "$dir/$tool" ]; then put_lib "$dir/$tool" "$abi" "$tool" cmd-tools; fi
             done
             echo "$abi done"
           done
@@ -780,21 +870,56 @@ jobs:
               put_raw "$f" "$(basename "$f")" main
             done
           done
-          # The app re-installs the shell tools when this stamp changes.
-          date -u '+%Y/%m/%d %H:%M:%S' > version_bash.tmp
-          put_raw version_bash.tmp version_bash main
-          rm version_bash.tmp
+          if [ "$BUILD_TERMUX_TOOLS" = true ]; then
+            # The app re-installs the shell tools when this stamp changes.
+            date -u '+%Y/%m/%d %H:%M:%S' > version_bash.tmp
+            put_raw version_bash.tmp version_bash main
+            rm version_bash.tmp
+          fi
           echo "::endgroup::"
 
+          # has_lib <abi> <name>: does the droidvim flavor have this library?
+          has_lib() {
+            local d
+            for d in "${lib_dirs[@]}"; do
+              if [ -f "term/src/$d/jniLibs/$1/$2" ]; then return 0; fi
+            done
+            return 1
+          }
+
           echo "::group::Helper scripts"
+          # The scripts in payload/scripts match the Termux tools built here
+          # (am, busybox); with prebuilt tools, keep the repo's own scripts
+          # and only add missing ones.
           for f in payload/scripts/*/lib*.so; do
             dir=$(basename "$(dirname "$f")")
+            name=$(basename "$f")
             for abi in "${abis[@]}"; do
-              put_lib "$f" "$abi" "$(basename "$f")" "$dir"
+              if [ "$BUILD_TERMUX_TOOLS" = true ] || ! has_lib "$abi" "$name"; then
+                put_lib "$f" "$abi" "$name" "$dir"
+              fi
             done
-            echo "$dir/$(basename "$f")"
+            echo "$dir/$name"
           done
           echo "::endgroup::"
+
+          # With building switched off, say which prebuilt tools are missing.
+          for abi in "${abis[@]}"; do
+            missing=()
+            if [ "$BUILD_CMD_TOOLS" != true ]; then
+              for lib in libgrep.so libdiff.so libctags.so; do
+                has_lib "$abi" "$lib" || missing+=("$lib")
+              done
+            fi
+            if [ "$BUILD_TERMUX_TOOLS" != true ]; then
+              for lib in libterm-bash.tar.so libbusybox.so libzip.tar.so libunzip.tar.so libproot.so; do
+                has_lib "$abi" "$lib" || missing+=("$lib")
+              done
+            fi
+            if [ ${#missing[@]} -gt 0 ]; then
+              echo "::warning::$abi: no prebuilt ${missing[*]} in the repository and building them is switched off; the APK will lack those tools"
+            fi
+          done
 
           echo "Native libraries per ABI:"
           for abi in "${abis[@]}"; do

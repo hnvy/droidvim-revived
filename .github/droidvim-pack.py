@@ -21,6 +21,7 @@ Output (under --out):
 """
 
 import argparse
+import hashlib
 import io
 import os
 import re
@@ -33,12 +34,22 @@ import tempfile
 # Packages whose files only matter as shared libraries for other tools.
 LIB_ONLY = ("pcre2", "libandroid-selinux", "libtalloc", "libandroid-shmem")
 
+# Packages not shipped at all: static libraries, GUI parts that need X11/Tk,
+# git's Perl-based svn bridge, and pip wheels for ensurepip (pip itself is
+# shipped as python-pip).
+SKIP = re.compile(r"-static$|^python-tkinter$|^python-ensurepip-wheels$"
+                  r"|^git-(gui|gitk|svn)$|^gitk$")
+
 # Paths never shipped (docs, headers, static libs, terminfo which the app
 # installs from its own terminfo_min resource, ...).
 DROP = re.compile(
     r"^usr/(include|var|share/(man|doc|info|locale|terminfo|LICENSES|"
-    r"bash-completion|zsh|fish|aclocal|readline|pkgconfig|examples))(/|$)"
+    r"bash-completion|zsh|fish|aclocal|readline|pkgconfig|examples|"
+    r"gitweb|git-gui|gitk))(/|$)"
     r"|^usr/lib/(pkgconfig|cmake)(/|$)"
+    # Python's own test suite and GUI modules (no Tk on DroidVim).
+    r"|^usr/lib/python3[^/]*/(test|idlelib|tkinter|turtledemo|ensurepip)(/|$)"
+    r"|/__pycache__(/|$)"
     r"|\.(a|la)$"
 )
 
@@ -151,7 +162,8 @@ def main():
     for deb in debs:
         path = os.path.join(args.debs, deb)
         pkg = deb_field(path, "Package")
-        if pkg.endswith("-static"):
+        if SKIP.search(pkg):
+            print(f"{deb}: package {pkg} (skipped)")
             continue
         dest = os.path.join(work, pkg)
         subprocess.run(["dpkg-deb", "-x", path, dest], check=True)
@@ -191,6 +203,15 @@ def main():
     if "usr/etc/bash.bashrc" in bundles.get("term-bash", {}):
         bundles["term-bash"]["usr/etc/bash.bashrc"] = (None, "data", BASHRC)
 
+    # Termux builds git to run `pager` and `editor` (Debian alternatives);
+    # point them at less and DroidVim's vim ($APPFILES/bin/vim).
+    tb = bundles.get("term-bash", {})
+    if "usr/bin/git" in tb:
+        if "usr/bin/pager" not in tb and "usr/bin/less" in tb:
+            tb["usr/bin/pager"] = (None, "symlink", "less")
+        if "usr/bin/editor" not in tb:
+            tb["usr/bin/editor"] = (None, "symlink", "../../bin/vim")
+
     provided = set()
     elf_files = []
     os.makedirs(args.out, exist_ok=True)
@@ -199,9 +220,20 @@ def main():
         outdir = os.path.join(args.out, "bundles", bundle, args.abi)
         os.makedirs(outdir, exist_ok=True)
         chunks, rest = [], []
+        first_by_hash = {}
         for rel in sorted(entries):
             full, kind, link = entries[rel]
             if kind == "file" and needs_chunk(full):
+                # Identical copies (e.g. hard links) become symlinks to the
+                # first one instead of extra copies in the APK.
+                with open(full, "rb") as f:
+                    digest = hashlib.sha256(f.read()).hexdigest()
+                if digest in first_by_hash:
+                    target = os.path.relpath(first_by_hash[digest], os.path.dirname(rel))
+                    entries[rel] = (None, "symlink", target)
+                    rest.append(rel)
+                    continue
+                first_by_hash[digest] = rel
                 chunks.append(rel)
             else:
                 rest.append(rel)
