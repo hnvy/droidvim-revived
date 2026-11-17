@@ -10,15 +10,22 @@
 # - optionally git and Python (with pip), also from termux-packages
 # - DroidVim's helper scripts from payload/scripts
 #
-# Building grep/diff/ctags and the Termux tools is optional; when switched
-# off, the prebuilt copies already in the repository are used.
-# App resources (layouts, strings, DroidVim's settings archives) still come
+# The Termux tools take about an hour to build, so they are built once and
+# then reused: in the default "auto" mode a run takes them from the most
+# recent earlier run that built them (with the same git/Python choice), and
+# only builds when there is none. Building grep/diff/ctags is optional too;
+# when a part isn't built, the prebuilt copies already in the repository are
+# used. App resources (layouts, strings, DroidVim's settings archives) come
 # from the repository; .github/check-payload.sh lists anything missing.
 #
 # Runs on every push, or from the Actions tab ("Run workflow") with options.
 # Defaults for push builds can be changed with repository variables
 # (Settings > Secrets and variables > Actions > Variables):
-#   BUILD_CMD_TOOLS, BUILD_TERMUX_TOOLS, WITH_GIT, WITH_PYTHON = true/false
+#   TERMUX_TOOLS          auto | build | reuse | repo   (default auto)
+#   TERMUX_REUSE_RUN      run ID or URL to take the Termux tools from
+#   TERMUX_PACKAGES_REF   termux-packages branch/tag/commit (default master)
+#   BUILD_CMD_TOOLS, WITH_GIT, WITH_PYTHON = true/false (default true)
+#   ANDROID_API           minimum API level (default 21, keep = minSdk)
 
 name: Build Vim for Android + DroidVim APK
 
@@ -32,10 +39,6 @@ on:
         description: Vim tag, branch or commit to build (e.g. v9.2.0501)
         required: true
         default: v9.2.0501
-      android_api:
-        description: Minimum Android API level (keep equal to minSdk in build.gradle)
-        required: true
-        default: '21'
       enable_nls:
         description: Build with translations (+gettext; builds GNU libintl)
         type: boolean
@@ -56,10 +59,19 @@ on:
         description: Build grep, diff and ctags from source (off = use the repo's prebuilt ones)
         type: boolean
         default: true
-      build_termux_tools:
-        description: Build bash, zip, busybox, proot, am (+ git/python) with termux-packages (off = use the repo's prebuilt ones)
-        type: boolean
-        default: true
+      termux_tools:
+        description: "bash, zip, busybox, proot, am, git, python: auto = reuse the last build, else build | build | reuse | repo = the repo's prebuilt files"
+        type: choice
+        options:
+          - auto
+          - build
+          - reuse
+          - repo
+        default: auto
+      termux_reuse_run:
+        description: Run ID or URL to reuse the Termux tools from (empty = latest run that built them)
+        required: false
+        default: ''
       extra_tools:
         description: Extra tools to include (needs the Termux tools build)
         type: choice
@@ -70,21 +82,26 @@ on:
           - none
         default: git and python
       termux_packages_ref:
-        description: termux-packages branch, tag or commit for the Termux tools
+        description: termux-packages branch, tag or commit when building the Termux tools
         required: true
         default: master
 
 permissions:
   contents: read
+  # To find and download the Termux tools built by earlier runs.
+  actions: read
 
+# One run per branch at a time. Newer pushes wait instead of cancelling the
+# running build, so an hour-long Termux build isn't thrown away; if several
+# pushes arrive meanwhile, only the newest one runs afterwards.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   VIM_REPO: https://github.com/vim/vim.git
   VIM_REF: ${{ inputs.vim_ref || 'v9.2.0501' }}
-  ANDROID_API: ${{ inputs.android_api || '21' }}
+  ANDROID_API: ${{ vars.ANDROID_API || '21' }}
   ENABLE_NLS: ${{ inputs.enable_nls != false }}
   ENABLE_LUA: ${{ inputs.enable_lua == true }}
   ALLOW_PATCH_FAILURES: ${{ inputs.allow_patch_failures == true }}
@@ -98,16 +115,20 @@ env:
   # dependency is compiled changes, since the cache key only covers versions
   # and options).
   DEPS_CACHE_REV: '2'
+  # The same for the cached Termux tools.
+  TERMUX_CACHE_REV: '2'
   # Command-line tools: 'latest' looks up the newest release at build time.
   GREP_VERSION: latest
   DIFFUTILS_VERSION: latest
   CTAGS_VERSION: latest
-  TERMUX_PACKAGES_REF: ${{ inputs.termux_packages_ref || 'master' }}
+  TERMUX_PACKAGES_REF: ${{ inputs.termux_packages_ref || vars.TERMUX_PACKAGES_REF || 'master' }}
   DROIDVIM_PACKAGE: com.droidvim
   # Optional parts: the Run workflow choice, else a repository variable,
   # else on.
   BUILD_CMD_TOOLS: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.build_cmd_tools) || vars.BUILD_CMD_TOOLS || 'true' }}
-  BUILD_TERMUX_TOOLS: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.build_termux_tools) || vars.BUILD_TERMUX_TOOLS || 'true' }}
+  # BUILD_TERMUX_TOOLS=false is still honoured as TERMUX_TOOLS=repo.
+  TERMUX_TOOLS: ${{ github.event_name == 'workflow_dispatch' && inputs.termux_tools || vars.TERMUX_TOOLS || (vars.BUILD_TERMUX_TOOLS == 'false' && 'repo') || 'auto' }}
+  TERMUX_REUSE_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.termux_reuse_run || vars.TERMUX_REUSE_RUN || '' }}
   WITH_GIT: ${{ github.event_name == 'workflow_dispatch' && format('{0}', contains(inputs.extra_tools, 'git')) || vars.WITH_GIT || 'true' }}
   WITH_PYTHON: ${{ github.event_name == 'workflow_dispatch' && format('{0}', contains(inputs.extra_tools, 'python')) || vars.WITH_PYTHON || 'true' }}
 
@@ -124,31 +145,118 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       vim_version: ${{ steps.version.outputs.vim_version }}
-      build_termux_tools: ${{ steps.options.outputs.build_termux_tools }}
+      termux_mode: ${{ steps.options.outputs.termux_mode }}
+      termux_run_id: ${{ steps.options.outputs.termux_run_id }}
     steps:
-      - name: Build options
+      - name: Build options and Termux tools plan
         id: options
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for v in BUILD_CMD_TOOLS BUILD_TERMUX_TOOLS WITH_GIT WITH_PYTHON; do
+          for v in BUILD_CMD_TOOLS WITH_GIT WITH_PYTHON; do
             case "${!v}" in
               true|false) ;;
               *) echo "::error::$v must be true or false, not '${!v}'"; exit 1;;
             esac
           done
-          echo "build_termux_tools=$BUILD_TERMUX_TOOLS" >> "$GITHUB_OUTPUT"
+          mode=$TERMUX_TOOLS
+          case "$mode" in
+            auto|build|reuse|repo) ;;
+            *) echo "::error::TERMUX_TOOLS must be auto, build, reuse or repo, not '$mode'"; exit 1;;
+          esac
+
+          abis=(arm64-v8a armeabi-v7a x86_64 x86)
+          # Runs that built a complete set of Termux tools (all ABIs, nothing
+          # skipped) upload a marker artifact named after the git/Python
+          # choice; reuse looks for that.
+          marker="termux-info-git${WITH_GIT}-py${WITH_PYTHON}"
+          # has_payload <run id>: does that run still have all four payloads?
+          has_payload() {
+            local names abi
+            names=" $(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$1/artifacts?per_page=100" \
+                       --jq '[.artifacts[] | select(.expired | not) | .name] | join(" ")') "
+            for abi in "${abis[@]}"; do
+              [[ "$names" == *" termux-payload-$abi "* ]] || return 1
+            done
+          }
+          # latest_payload: newest earlier run with a complete payload for
+          # the current git/Python choice.
+          latest_payload() {
+            local id
+            for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=50" \
+                          --jq '.artifacts[] | select(.expired | not) | .workflow_run.id'); do
+              if [ "$id" != "$GITHUB_RUN_ID" ] && has_payload "$id"; then echo "$id"; return 0; fi
+            done
+            return 1
+          }
+
+          run_id=""
+          reason=""
+          if [ -n "$TERMUX_REUSE_RUN" ] && [ "$mode" = auto ]; then mode=reuse; fi
+          case "$mode" in
+            reuse)
+              if [ -n "$TERMUX_REUSE_RUN" ]; then
+                run_id=$(sed -E 's#^.*/runs/([0-9]+).*$#\1#' <<< "$TERMUX_REUSE_RUN")
+                if ! [[ "$run_id" =~ ^[0-9]+$ ]]; then
+                  echo "::error::'$TERMUX_REUSE_RUN' is not a run ID or run URL"; exit 1
+                fi
+                if ! has_payload "$run_id"; then
+                  echo "::error::Run $run_id has no (unexpired) termux-payload artifacts for all four ABIs"; exit 1
+                fi
+                reason="run $run_id, as requested"
+              elif run_id=$(latest_payload); then
+                reason="latest earlier run with these tools"
+              else
+                echo "::error::No earlier run has a complete set of Termux tools with git=$WITH_GIT, python=$WITH_PYTHON (or they have expired). Run once with termux_tools=build."
+                exit 1
+              fi
+              ;;
+            auto)
+              if [ "$TERMUX_PACKAGES_REF" != master ]; then
+                mode=build
+                reason="a specific termux-packages version ($TERMUX_PACKAGES_REF) was requested"
+              elif run_id=$(latest_payload); then
+                mode=reuse
+                reason="latest earlier run with these tools"
+              else
+                mode=build
+                reason="no earlier run has built them yet"
+              fi
+              ;;
+            build) reason="building was requested" ;;
+            repo) reason="using the prebuilt files in the repository" ;;
+          esac
+          echo "termux_mode=$mode" >> "$GITHUB_OUTPUT"
+          echo "termux_run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+          run_link=""
+          if [ -n "$run_id" ]; then
+            run_link="[run $run_id]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id)"
+            echo "::notice::Reusing the Termux tools from run $run_id ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id)"
+          fi
+          case "$mode" in
+            build) termux_src="built in this run" ;;
+            reuse) termux_src="reused from $run_link" ;;
+            repo)  termux_src="prebuilt files in the repository" ;;
+          esac
+          extras=no
+          if [ "$mode" != repo ]; then extras=yes; fi
           {
             echo "### Build options"
-            echo "| Part | Built from source |"
+            echo "| Part | Source |"
             echo "| --- | --- |"
-            echo "| Vim $VIM_REF + runtime | always |"
-            echo "| grep, diff, ctags | $BUILD_CMD_TOOLS |"
-            echo "| bash, zip/unzip, busybox, proot, am | $BUILD_TERMUX_TOOLS |"
-            echo "| git | $([ "$BUILD_TERMUX_TOOLS" = true ] && echo "$WITH_GIT" || echo false) |"
-            echo "| Python 3 + pip | $([ "$BUILD_TERMUX_TOOLS" = true ] && echo "$WITH_PYTHON" || echo false) |"
+            echo "| Vim $VIM_REF + runtime | built in this run |"
+            echo "| grep, diff, ctags | $([ "$BUILD_CMD_TOOLS" = true ] && echo "built in this run" || echo "prebuilt files in the repository") |"
+            echo "| bash, zip/unzip, busybox, proot, am | $termux_src |"
+            echo "| git | $([ "$extras" = yes ] && [ "$WITH_GIT" = true ] && echo "$termux_src" || echo "not included") |"
+            echo "| Python 3 + pip | $([ "$extras" = yes ] && [ "$WITH_PYTHON" = true ] && echo "$termux_src" || echo "not included") |"
+            echo ""
+            echo "Termux tools: **$mode** ($reason)."
           } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$BUILD_TERMUX_TOOLS" != true ] && { [ "$WITH_GIT" = true ] || [ "$WITH_PYTHON" = true ]; }; then
-            echo "::notice::git and Python are only added when the Termux tools are built."
+          echo "Termux tools: $mode ($reason)"
+          if [ "$mode" = repo ] && { [ "$WITH_GIT" = true ] || [ "$WITH_PYTHON" = true ]; }; then
+            echo "::notice::git and Python are only added when the Termux tools are built or reused."
           fi
 
       - uses: actions/checkout@v4
@@ -643,7 +751,7 @@ jobs:
   # ---------------------------------------------------------------------------
   termux-payload:
     needs: prepare-source
-    if: needs.prepare-source.outputs.build_termux_tools == 'true'
+    if: needs.prepare-source.outputs.termux_mode == 'build'
     runs-on: ubuntu-latest
     timeout-minutes: 350
     strategy:
@@ -687,7 +795,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: payload-out
-          key: termux-payload-${{ matrix.abi }}-${{ steps.tp.outputs.sha }}-${{ env.DROIDVIM_PACKAGE }}-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}-${{ hashFiles('droidvim/.github/droidvim-pack.py') }}
+          key: termux-payload-${{ matrix.abi }}-${{ steps.tp.outputs.sha }}-${{ env.DROIDVIM_PACKAGE }}-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}-${{ hashFiles('droidvim/.github/droidvim-pack.py') }}-r${{ env.TERMUX_CACHE_REV }}
 
       - name: Free disk space for the Termux build container
         if: steps.cache.outputs.cache-hit != 'true'
@@ -768,6 +876,15 @@ jobs:
           set -euo pipefail
           python3 droidvim/.github/droidvim-pack.py --debs termux-packages/output \
             --abi "$ABI" --arch "$DV_ARCH" --package "$DROIDVIM_PACKAGE" --out payload-out
+          # Record what was built, for runs that reuse this payload.
+          jq -n --arg abi "$ABI" --arg ref "$TERMUX_PACKAGES_REF" --arg sha "${{ steps.tp.outputs.sha }}" \
+                --argjson git "$WITH_GIT" --argjson python "$WITH_PYTHON" \
+                --argjson partial "${PARTIAL:-false}" --arg run "$GITHUB_RUN_ID" \
+                --arg built "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                '{abi: $abi, termux_packages_ref: $ref, termux_packages_commit: $sha,
+                  git: $git, python: $python, partial: $partial, built_in_run: $run, built_at: $built}' \
+            > payload-out/info.json
+          cat payload-out/info.json
           find payload-out -type f | sort
 
       - name: Save payload to cache
@@ -783,8 +900,59 @@ jobs:
           path: payload-out
           if-no-files-found: error
 
+      - name: Record whether this ABI is complete
+        run: |
+          mkdir -p status
+          jq -r '.partial' payload-out/info.json > "status/$ABI"
+          cat "status/$ABI"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: termux-status-${{ matrix.abi }}
+          path: status
+          retention-days: 1
+
   # ---------------------------------------------------------------------------
-  # 5. Put everything into the DroidVim tree and build the APK.
+  # 5. Mark this run's Termux tools as reusable, when all four ABIs were
+  #    built completely (nothing skipped), so later runs can find them.
+  # ---------------------------------------------------------------------------
+  termux-payload-info:
+    needs: [prepare-source, termux-payload]
+    if: needs.termux-payload.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: termux-status-*
+          path: status
+          merge-multiple: true
+
+      - name: Check all ABIs
+        id: check
+        run: |
+          set -euo pipefail
+          complete=true
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            state=$(cat "status/$abi" 2>/dev/null || echo missing)
+            echo "$abi: partial=$state"
+            if [ "$state" != false ]; then complete=false; fi
+          done
+          echo "complete=$complete" >> "$GITHUB_OUTPUT"
+          if [ "$complete" != true ]; then
+            echo "::warning::Some Termux tools failed to build, so later runs won't reuse this run's tools automatically (they can still be reused by giving this run's ID)."
+          fi
+          jq -n --arg run "$GITHUB_RUN_ID" --argjson git "$WITH_GIT" --argjson python "$WITH_PYTHON" \
+                --arg ref "$TERMUX_PACKAGES_REF" '{run: $run, git: $git, python: $python, termux_packages_ref: $ref}' \
+            > termux-info.json
+
+      - uses: actions/upload-artifact@v4
+        if: steps.check.outputs.complete == 'true'
+        with:
+          name: termux-info-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}
+          path: termux-info.json
+
+  # ---------------------------------------------------------------------------
+  # 6. Put everything into the DroidVim tree and build the APK.
   # ---------------------------------------------------------------------------
   apk:
     needs: [prepare-source, vim-binary, vim-runtime, termux-payload]
@@ -798,6 +966,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VIM_VERSION: ${{ needs.prepare-source.outputs.vim_version }}
+      TERMUX_MODE: ${{ needs.prepare-source.outputs.termux_mode }}
+      TERMUX_RUN_ID: ${{ needs.prepare-source.outputs.termux_run_id }}
     steps:
       - uses: actions/checkout@v4
 
@@ -818,11 +988,43 @@ jobs:
           name: vim-runtime
           path: dl/vim-runtime
 
-      - uses: actions/download-artifact@v4
-        if: env.BUILD_TERMUX_TOOLS == 'true'
+      - name: Download the Termux tools built in this run
+        if: env.TERMUX_MODE == 'build'
+        uses: actions/download-artifact@v4
         with:
           pattern: termux-payload-*
           path: dl
+
+      - name: Download the Termux tools from run ${{ env.TERMUX_RUN_ID }}
+        if: env.TERMUX_MODE == 'reuse'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: termux-payload-*
+          path: dl
+          run-id: ${{ env.TERMUX_RUN_ID }}
+          repository: ${{ github.repository }}
+          github-token: ${{ github.token }}
+
+      - name: Check the Termux tools
+        if: env.TERMUX_MODE != 'repo'
+        run: |
+          set -euo pipefail
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            info="dl/termux-payload-$abi/info.json"
+            if [ ! -f "$info" ]; then
+              echo "::error::The Termux tools for $abi are missing"; exit 1
+            fi
+            jq -r '"\(.abi): termux-packages \(.termux_packages_ref) @ \(.termux_packages_commit[0:12]), git=\(.git), python=\(.python), partial=\(.partial), built \(.built_at) in run \(.built_in_run)"' "$info"
+            if [ "$(jq -r .partial "$info")" = true ]; then
+              echo "::warning::$abi: some Termux tools failed to build in run $(jq -r .built_in_run "$info") and are missing"
+            fi
+            for tool in git python; do
+              want=WITH_${tool^^}
+              if [ "$(jq -r ".$tool" "$info")" != "${!want}" ]; then
+                echo "::warning::$abi: the reused tools were built with $tool=$(jq -r ".$tool" "$info"), not ${!want} as requested"
+              fi
+            done
+          done
 
       - name: Install the built files into the DroidVim source tree
         run: |
@@ -906,7 +1108,7 @@ jobs:
               put_raw "$f" "$(basename "$f")" main
             done
           done
-          if [ "$BUILD_TERMUX_TOOLS" = true ]; then
+          if [ "$TERMUX_MODE" != repo ]; then
             # The app re-installs the shell tools when this stamp changes.
             date -u '+%Y/%m/%d %H:%M:%S' > version_bash.tmp
             put_raw version_bash.tmp version_bash main
@@ -931,7 +1133,7 @@ jobs:
             dir=$(basename "$(dirname "$f")")
             name=$(basename "$f")
             for abi in "${abis[@]}"; do
-              if [ "$BUILD_TERMUX_TOOLS" = true ] || ! has_lib "$abi" "$name"; then
+              if [ "$TERMUX_MODE" != repo ] || ! has_lib "$abi" "$name"; then
                 put_lib "$f" "$abi" "$name" "$dir"
               fi
             done
@@ -947,7 +1149,7 @@ jobs:
                 has_lib "$abi" "$lib" || missing+=("$lib")
               done
             fi
-            if [ "$BUILD_TERMUX_TOOLS" != true ]; then
+            if [ "$TERMUX_MODE" = repo ]; then
               for lib in libterm-bash.tar.so libbusybox.so libzip.tar.so libunzip.tar.so libproot.so; do
                 has_lib "$abi" "$lib" || missing+=("$lib")
               done
