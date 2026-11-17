@@ -9,7 +9,7 @@ This project is a fork of [DroidVim (dead link as repo was deleted)](https://git
 
 # Why "revived"?
 
-Sadly, after trying many times to get in touch with the original dev, I was unable to learn what happened. Play Store no longer had a copy. F-droid too. The repo was deleted and the code was lost (almost!). Compiling it was giving me plenty of errors and the Vim version was outdated.
+Sadly, after trying many times to get in touch with the original dev, I was unable to learn what happened to them or if they're well. Play Store no longer had a copy. F-droid too. The repo was deleted and the code was lost (almost!). Compiling it was giving me plenty of errors and the Vim version was outdated.
 
 But finally, it's been brought back to life!
 
