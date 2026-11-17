@@ -27,6 +27,10 @@ The interface for Droidvim was far superior and it ran much better on older devi
 
 Besides, it's always heartbreaking to see neat projects disappear.
 
+# Neovim?
+
+Support for Neovim is coming soon!
+
 # Licensing
  
 - This project is licensed under the GPL-3.0. See [LICENSE](LICENSE) for the full license text.  
