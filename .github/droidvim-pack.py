@@ -360,6 +360,17 @@ def main():
             elf_files.append((lib, full))
         print(f"single {src_dir}/{lib}")
 
+    # The app unpacks every bundle with busybox tar before any bundled library
+    # is in place, so busybox must not need one.
+    for src_dir, lib, full in singles:
+        if lib == "libbusybox.so":
+            _, needed = elf_info(full)
+            extra = [n for n in needed if n not in SYSTEM_LIBS]
+            if extra:
+                sys.exit(f"busybox needs {', '.join(extra)}, but it has to run before any bundled "
+                         "library is installed (the app unpacks everything with it). These Termux "
+                         "tools were built by an older version of the workflow: build them again.")
+
     # Warn about libraries a binary needs that nothing provides.
     for rel, full in elf_files:
         _, needed = elf_info(full)

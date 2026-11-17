@@ -133,7 +133,7 @@ env:
   # and options).
   DEPS_CACHE_REV: '2'
   # The same for the cached Termux tools.
-  TERMUX_CACHE_REV: '3'
+  TERMUX_CACHE_REV: '4'
   # Command-line tools: 'latest' looks up the newest release at build time.
   GREP_VERSION: latest
   DIFFUTILS_VERSION: latest
@@ -192,7 +192,7 @@ jobs:
           # Runs that built a complete set of Termux tools (all ABIs, nothing
           # skipped) upload a marker artifact named after the git/Python
           # choice; reuse looks for that.
-          marker="termux-info-v2-git${WITH_GIT}-py${WITH_PYTHON}"
+          marker="termux-info-v3-git${WITH_GIT}-py${WITH_PYTHON}"
           # has_payload <run id>: does that run still have all four payloads?
           has_payload() {
             local names abi
@@ -865,6 +865,20 @@ jobs:
               sed -i -E 's/^TERMUX_SUBPKG_DEPENDS=.*/TERMUX_SUBPKG_DEPENDS=""/' "$f"
             fi
           done
+          # - busybox: DroidVim unpacks the other tools with busybox tar before
+          #   any of their libraries are in place (it only checks that the
+          #   busybox file is executable, not that it runs), so busybox has to
+          #   be one self-contained program, as in the original DroidVim: no
+          #   shared libbusybox.so and no SELinux library.
+          sed -i -E 's/^CONFIG_(SELINUX|BUILD_LIBBUSYBOX|FEATURE_SHARED_BUSYBOX)=y$/# CONFIG_\1 is not set/' packages/busybox/busybox.config
+          sed -i -E '/^TERMUX_PKG_DEPENDS=/ { s/, *libandroid-selinux//; s/libandroid-selinux *,? *// }' packages/busybox/build.sh
+          sed -i -E 's#\./0_lib/busybox_unstripped#./busybox_unstripped#; /libbusybox\.so/d' packages/busybox/build.sh
+          if grep -qE '^CONFIG_(SELINUX|BUILD_LIBBUSYBOX|FEATURE_SHARED_BUSYBOX)=y' packages/busybox/busybox.config ||
+             grep -qE '^TERMUX_PKG_DEPENDS=.*selinux|0_lib|libbusybox\.so' packages/busybox/build.sh ||
+             ! grep -q '"./busybox_unstripped"' packages/busybox/build.sh; then
+            echo "::error::Could not switch busybox to a self-contained build (termux-packages changed?)"
+            exit 1
+          fi
           # - python: Tkinter would need Tk and X11, which DroidVim lacks.
           if [ "$WITH_PYTHON" = true ]; then
             sed -i -E '/^TERMUX_PKG_BUILD_DEPENDS=/ { s/, *tk *,/,/; s/"tk *, */"/; s/, *tk"/"/; s/"tk"/""/ }' packages/python/build.sh
@@ -1005,7 +1019,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.check.outputs.complete == 'true'
         with:
-          name: termux-info-v2-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}
+          name: termux-info-v3-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}
           path: termux-info.json
 
   # ---------------------------------------------------------------------------

@@ -1,7 +1,6 @@
 #!/system/bin/sh
 
-# busybox is built as a small program plus usr/lib/libbusybox.so.
-export LD_LIBRARY_PATH=$APPFILES/usr/lib
+export LD_LIBRARY_PATH=
 BBDIR=$APPFILES/usr/bin
 BUSYBOX=busybox
 SYS_PATH=/system/bin
