@@ -29,7 +29,7 @@ Besides, it's always heartbreaking to see neat projects disappear.
 
 # Licensing
  
-- This project is licensed under the GNU General Public License, version 3 (GPL-3.0). See [LICENSE](LICENSE) for the full license text.  
+- This project is licensed under the GPL-3.0. See [LICENSE](LICENSE) for the full license text.  
 - Code inherited from DroidVim and [Terminal Emulator for Android](https://github.com/jackpal/Android-Terminal-Emulator) was released under the Apache License, Version 2.0, and remains available under that license; its original copyright and license notices are kept.
 
 # Building DroidVim with GitHub Actions
