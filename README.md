@@ -2,7 +2,6 @@
  
 This project is a fork of [DroidVim (dead link as repo was deleted)](https://github.com/shiftrot/droidvim) by shiftrot, which is itself based on [Terminal Emulator for Android](https://github.com/jackpal/Android-Terminal-Emulator) by Jack Palevich.
 
-
 # Why "revived"?
 
 Sadly, after trying many times to get in touch with the original dev, I was unable to learn what happened to them or if they're well. Play Store no longer had a copy. F-droid too. The repo was deleted and the code was lost (almost!). Compiling it was giving me plenty of errors and the Vim version was outdated.
