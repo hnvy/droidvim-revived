@@ -7,6 +7,31 @@ This project is a fork of [DroidVim (dead link as repo was deleted)](https://git
 - This project is licensed under the GNU General Public License, version 3 (GPL-3.0). See [LICENSE](LICENSE) for the full license text.  
 - Code inherited from DroidVim and [Terminal Emulator for Android](https://github.com/jackpal/Android-Terminal-Emulator) was released under the Apache License, Version 2.0, and remains available under that license; its original copyright and license notices are kept.
 
+# Why "revived"?
+
+Sadly, after trying many times to get in touch with the original dev, I was unable to learn what happened. Play Store no longer had a copy. F-droid too. The repo was deleted and the code was lost (almost!). Compiling it was giving me plenty of errors and the Vim version was outdated.
+
+But finally, it's been brought back to life!
+
+This repo now ships with the latest version of Vim (plus Lua support!) and the new binaries for the shell commands!
+
+It is still in pre-release stage until further testing is done.
+
+I hope you're well, shiftrot.
+<br>
+<br>
+<br>
+<br>
+Best wishes,
+
+Harvey R., MD
+
+# Why not use Termux?
+
+The interface for Droidvim was far superior and it ran much better on older devices.
+
+Besides, it's always heartbreaking to see neat projects disappear.
+
 # Building DroidVim with GitHub Actions
 
 `.github/workflows/build-vim-apk.yml` builds what DroidVim runs on the device,
