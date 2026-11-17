@@ -286,26 +286,41 @@ def main():
                 elf_files.append((rel, entries[rel][0]))
                 provided.add(os.path.basename(rel))
 
-        # Links to executables and libraries (libreadline.so.8 ->
-        # libreadline.so.8.3, python3 -> python3.13, git's dashed commands)
-        # are listed as extra names of the same .so file instead of being
-        # stored as links in the archive. The app unpacks the archive before
-        # it links the .so files into place, and its built-in unpacker (used
-        # whenever busybox can't run yet, e.g. on first install) skips links
-        # whose target doesn't exist at that moment.
-        kept = []
+        # How the app installs a bundle (TermVimInstaller/JniLibsToBin):
+        # 1. it unpacks lib<bundle>.tar.so: busybox tar if busybox works,
+        #    otherwise its own Java unpacker, which writes files first and
+        #    then creates a link only if the link's target exists already
+        #    (taking the target as <link's directory>/<link text>);
+        # 2. it links the .so files into place from the link list, read into
+        #    a map keyed by .so name, so each .so gets exactly one path.
+        # So links in the archive point straight at their final target
+        # (no chains, no absolute paths), and every executable or library a
+        # link points to gets an empty placeholder file in the archive, which
+        # step 2 then replaces with the real link.
+        placeholders = set()
         for rel in rest:
             full, kind, link = entries[rel]
             if kind == "alias":  # another name for one of the app's own libs
                 lines.append(f"{link}|{rel}")
                 continue
-            target = resolve_link(rel, entries, args.package) if kind == "symlink" else None
+            if kind != "symlink":
+                continue
+            target = resolve_link(rel, entries, args.package)
+            if target is None:
+                continue  # leaves the bundle (or dangles): leave as it is
+            entries[rel] = (None, "symlink", os.path.relpath(target, os.path.dirname(rel)))
             if target in lib_of:
-                lines.append(f"{lib_of[target]}|{rel}")
+                placeholders.add(target)
                 provided.add(os.path.basename(rel))
-            else:
-                kept.append(rel)
-        rest = kept
+        rest = [rel for rel in rest if entries[rel][1] != "alias"]
+
+        libs_seen = {}
+        for line in lines:
+            lib, path = line.split("|", 1)
+            if lib in libs_seen:
+                sys.exit(f"internal error: {lib} would be linked as both {libs_seen[lib]} and {path}, "
+                         "but the app keeps only one path per library")
+            libs_seen[lib] = path
 
         dirs = set()
         for rel in chunks + rest:
@@ -317,6 +332,8 @@ def main():
                           format=tarfile.GNU_FORMAT) as tar:
             for d in sorted(dirs):
                 add_tar_entry(tar, d, kind="dir")
+            for rel in sorted(placeholders):
+                add_tar_entry(tar, rel, kind="file", data=b"")
             for rel in rest:
                 full, kind, link = entries[rel]
                 if kind == "symlink":
@@ -324,6 +341,8 @@ def main():
                     provided.add(os.path.basename(rel))
                 elif kind == "data":
                     add_tar_entry(tar, rel, kind="file", data=link.encode())
+                elif kind == "alias":
+                    continue
                 else:
                     add_tar_entry(tar, rel, full, kind="file")
 
