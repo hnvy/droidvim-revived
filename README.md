@@ -1,11 +1,7 @@
 # DroidVim-revived
  
 This project is a fork of [DroidVim (dead link as repo was deleted)](https://github.com/shiftrot/droidvim) by shiftrot, which is itself based on [Terminal Emulator for Android](https://github.com/jackpal/Android-Terminal-Emulator) by Jack Palevich.
- 
-# Licensing
- 
-- This project is licensed under the GNU General Public License, version 3 (GPL-3.0). See [LICENSE](LICENSE) for the full license text.  
-- Code inherited from DroidVim and [Terminal Emulator for Android](https://github.com/jackpal/Android-Terminal-Emulator) was released under the Apache License, Version 2.0, and remains available under that license; its original copyright and license notices are kept.
+
 
 # Why "revived"?
 
@@ -31,6 +27,11 @@ Harvey R., MD
 The interface for Droidvim was far superior and it ran much better on older devices.
 
 Besides, it's always heartbreaking to see neat projects disappear.
+
+# Licensing
+ 
+- This project is licensed under the GNU General Public License, version 3 (GPL-3.0). See [LICENSE](LICENSE) for the full license text.  
+- Code inherited from DroidVim and [Terminal Emulator for Android](https://github.com/jackpal/Android-Terminal-Emulator) was released under the Apache License, Version 2.0, and remains available under that license; its original copyright and license notices are kept.
 
 # Building DroidVim with GitHub Actions
 
