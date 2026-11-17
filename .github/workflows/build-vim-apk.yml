@@ -510,7 +510,9 @@ jobs:
             cd "grep-$grep_v"
             ./configure --host="$HOST" --disable-nls --disable-perl-regexp "${lf[@]}" CFLAGS=-O2 "${gl_cross[@]}"
             make -C lib -j"$JOBS"
-            make -C src -j"$JOBS" grep
+            # Build src's default target rather than just `grep`: only that
+            # also creates the generated sources (BUILT_SOURCES).
+            make -C src -j"$JOBS"
           )
           cp "grep-$grep_v/src/grep" ../out-tools/libgrep.so
           echo "::endgroup::"
@@ -522,7 +524,10 @@ jobs:
             cd "diffutils-$diff_v"
             ./configure --host="$HOST" --disable-nls "${lf[@]}" CFLAGS=-O2 "${gl_cross[@]}"
             make -C lib -j"$JOBS"
-            make -C src -j"$JOBS" diff
+            # Build src's default target rather than just `diff`: only that
+            # also creates the generated sources such as version.h
+            # (BUILT_SOURCES). It builds cmp, diff3 and sdiff too.
+            make -C src -j"$JOBS"
           )
           cp "diffutils-$diff_v/src/diff" ../out-tools/libdiff.so
           echo "::endgroup::"
