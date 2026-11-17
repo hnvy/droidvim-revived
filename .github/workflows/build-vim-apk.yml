@@ -26,10 +26,15 @@
 #   TERMUX_PACKAGES_REF   termux-packages branch/tag/commit (default master)
 #   BUILD_CMD_TOOLS, WITH_GIT, WITH_PYTHON = true/false (default true)
 #   ANDROID_API           minimum API level (default 21, keep = minSdk)
+#   ENABLE_NLS, ENABLE_LUA = true/false (Vim translations, Lua; default true/false)
+#   PUBLISH_RELEASE       none | prerelease | release (default none)
+# Pushing a tag (e.g. v2.6.0) publishes a release named after the tag.
 
 name: Build Vim for Android + DroidVim APK
 
 on:
+  # Branch pushes build; pushing a tag (e.g. v2.6.0) also publishes a release
+  # named after it. (Path filters don't apply to tag pushes.)
   push:
     paths-ignore:
       - '**.md'
@@ -39,14 +44,15 @@ on:
         description: Vim tag, branch or commit to build (e.g. v9.2.0501)
         required: true
         default: v9.2.0501
-      enable_nls:
-        description: Build with translations (+gettext; builds GNU libintl)
-        type: boolean
-        default: true
-      enable_lua:
-        description: Add the Lua interpreter (+lua; builds Lua statically)
-        type: boolean
-        default: false
+      vim_extras:
+        description: "Vim extras: translations (+gettext) and/or the Lua interpreter (+lua)"
+        type: choice
+        options:
+          - translations
+          - translations and lua
+          - lua
+          - none
+        default: translations
       extra_configure_flags:
         description: Extra flags for Vim's configure (space separated)
         required: false
@@ -85,6 +91,14 @@ on:
         description: termux-packages branch, tag or commit when building the Termux tools
         required: true
         default: master
+      release:
+        description: Publish the APK on the Releases page
+        type: choice
+        options:
+          - none
+          - prerelease
+          - release
+        default: none
 
 permissions:
   contents: read
@@ -102,8 +116,11 @@ env:
   VIM_REPO: https://github.com/vim/vim.git
   VIM_REF: ${{ inputs.vim_ref || 'v9.2.0501' }}
   ANDROID_API: ${{ vars.ANDROID_API || '21' }}
-  ENABLE_NLS: ${{ inputs.enable_nls != false }}
-  ENABLE_LUA: ${{ inputs.enable_lua == true }}
+  ENABLE_NLS: ${{ github.event_name == 'workflow_dispatch' && format('{0}', contains(inputs.vim_extras, 'translations')) || vars.ENABLE_NLS || 'true' }}
+  ENABLE_LUA: ${{ github.event_name == 'workflow_dispatch' && format('{0}', contains(inputs.vim_extras, 'lua')) || vars.ENABLE_LUA || 'false' }}
+  # Releases: a pushed tag always publishes one; otherwise the Run workflow
+  # choice, else the PUBLISH_RELEASE repository variable, else none.
+  RELEASE: ${{ github.event_name == 'push' && github.ref_type == 'tag' && 'release' || github.event_name == 'workflow_dispatch' && inputs.release || vars.PUBLISH_RELEASE || 'none' }}
   ALLOW_PATCH_FAILURES: ${{ inputs.allow_patch_failures == true }}
   EXTRA_CONFIGURE_FLAGS: ${{ inputs.extra_configure_flags }}
   NDK_VERSION: r26d
@@ -147,6 +164,7 @@ jobs:
       vim_version: ${{ steps.version.outputs.vim_version }}
       termux_mode: ${{ steps.options.outputs.termux_mode }}
       termux_run_id: ${{ steps.options.outputs.termux_run_id }}
+      release: ${{ steps.options.outputs.release }}
     steps:
       - name: Build options and Termux tools plan
         id: options
@@ -154,12 +172,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for v in BUILD_CMD_TOOLS WITH_GIT WITH_PYTHON; do
+          for v in BUILD_CMD_TOOLS WITH_GIT WITH_PYTHON ENABLE_NLS ENABLE_LUA; do
             case "${!v}" in
               true|false) ;;
               *) echo "::error::$v must be true or false, not '${!v}'"; exit 1;;
             esac
           done
+          case "$RELEASE" in
+            none|prerelease|release) echo "release=$RELEASE" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::PUBLISH_RELEASE must be none, prerelease or release, not '$RELEASE'"; exit 1;;
+          esac
           mode=$TERMUX_TOOLS
           case "$mode" in
             auto|build|reuse|repo) ;;
@@ -253,6 +275,8 @@ jobs:
             echo "| Python 3 + pip | $([ "$extras" = yes ] && [ "$WITH_PYTHON" = true ] && echo "$termux_src" || echo "not included") |"
             echo ""
             echo "Termux tools: **$mode** ($reason)."
+            echo ""
+            echo "Release: **$RELEASE**$([ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_EVENT_NAME" = push ] && echo " (tag $GITHUB_REF_NAME)")."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Termux tools: $mode ($reason)"
           if [ "$mode" = repo ] && { [ "$WITH_GIT" = true ] || [ "$WITH_PYTHON" = true ]; }; then
@@ -604,6 +628,8 @@ jobs:
             ctags_v=${ctags_v:-6.2.1}
           fi
           echo "::notice::$ABI: grep $grep_v, diffutils $diff_v, Universal Ctags $ctags_v"
+          printf 'grep %s, diff (diffutils) %s, Universal Ctags %s\n' "$grep_v" "$diff_v" "$ctags_v" \
+            > ../out-tools/versions.txt
 
           # Answers for gnulib checks that can't run when cross-compiling.
           # The gnulib in grep/diffutils 3.12 (April 2025) predates the fixes
@@ -660,7 +686,7 @@ jobs:
           mkdir -p out
           cp vim/src/vim out/libvim.default.so
           cp vim/src/xxd/xxd out/libxxd.so
-          if [ "$BUILD_CMD_TOOLS" = true ]; then cp out-tools/*.so out/; fi
+          if [ "$BUILD_CMD_TOOLS" = true ]; then cp out-tools/*.so out-tools/versions.txt out/; fi
           "$STRIP" --strip-unneeded out/*.so
           file out/*.so
           for f in out/*.so; do
@@ -679,7 +705,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vim-android-${{ matrix.abi }}
-          path: out/*.so
+          path: out/*
           if-no-files-found: error
 
       - name: Upload build logs on failure
@@ -964,9 +990,13 @@ jobs:
       needs.vim-runtime.result == 'success' &&
       (needs.termux-payload.result == 'success' || needs.termux-payload.result == 'skipped')
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      title: ${{ steps.release.outputs.title }}
     env:
       VIM_VERSION: ${{ needs.prepare-source.outputs.vim_version }}
       TERMUX_MODE: ${{ needs.prepare-source.outputs.termux_mode }}
+      RELEASE: ${{ needs.prepare-source.outputs.release }}
       TERMUX_RUN_ID: ${{ needs.prepare-source.outputs.termux_run_id }}
     steps:
       - uses: actions/checkout@v4
@@ -1011,8 +1041,12 @@ jobs:
           set -euo pipefail
           for abi in arm64-v8a armeabi-v7a x86_64 x86; do
             info="dl/termux-payload-$abi/info.json"
-            if [ ! -f "$info" ]; then
+            if [ ! -d "dl/termux-payload-$abi" ]; then
               echo "::error::The Termux tools for $abi are missing"; exit 1
+            fi
+            if [ ! -f "$info" ]; then
+              echo "::notice::$abi: these Termux tools were built by an older version of this workflow (no build information)"
+              continue
             fi
             jq -r '"\(.abi): termux-packages \(.termux_packages_ref) @ \(.termux_packages_commit[0:12]), git=\(.git), python=\(.python), partial=\(.partial), built \(.built_at) in run \(.built_in_run)"' "$info"
             if [ "$(jq -r .partial "$info")" = true ]; then
@@ -1213,3 +1247,129 @@ jobs:
           name: DroidVim-vim${{ env.VIM_VERSION }}-${{ env.BUILD_TYPE }}
           path: term/build/outputs/apk/droidvim/**/*.apk
           if-no-files-found: error
+
+      - name: Prepare release files and notes
+        id: release
+        if: env.RELEASE != 'none'
+        run: |
+          set -euo pipefail
+          version=$(grep -oP "'versionName'\s*:\s*'\K[^']+" build.gradle)
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ "$GITHUB_REF_TYPE" = tag ]; then
+            tag=$GITHUB_REF_NAME
+            title="DroidVim $GITHUB_REF_NAME (Vim $VIM_VERSION)"
+          else
+            tag="v$version-build$GITHUB_RUN_NUMBER"
+            title="DroidVim ${version%%-vim*} · Vim $VIM_VERSION (build $GITHUB_RUN_NUMBER)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+
+          mkdir -p release
+          mapfile -t apks < <(find term/build/outputs/apk/droidvim -name '*.apk')
+          if [ ${#apks[@]} -ne 1 ]; then
+            echo "::error::Expected one APK, found ${#apks[@]}: ${apks[*]}"; exit 1
+          fi
+          apk="DroidVim-$version-$BUILD_TYPE.apk"
+          cp "${apks[0]}" "release/$apk"
+          (cd release && sha256sum "$apk" > SHA256SUMS.txt)
+
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          tools="prebuilt files in the repository"
+          if [ -f dl/vim-android-arm64-v8a/versions.txt ]; then
+            tools="$(cat dl/vim-android-arm64-v8a/versions.txt), built from source"
+          fi
+          info=dl/termux-payload-arm64-v8a/info.json
+          git_line="not included"; py_line="not included"
+          case "$TERMUX_MODE" in
+            repo)
+              termux="prebuilt files in the repository"
+              ;;
+            *)
+              if [ -f "$info" ]; then
+                commit=$(jq -r '.termux_packages_commit' "$info")
+                built_run=$(jq -r '.built_in_run' "$info")
+                termux="built with [termux-packages@${commit:0:12}](https://github.com/termux/termux-packages/tree/$commit) in [run $built_run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$built_run)"
+                if [ "$(jq -r .git "$info")" = true ]; then git_line="included"; fi
+                if [ "$(jq -r .python "$info")" = true ]; then py_line="included"; fi
+              else
+                termux="built with termux-packages in [run $TERMUX_RUN_ID]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$TERMUX_RUN_ID)"
+                if [ -n "$(find dl -path '*/raw/*' -name 'term_bash_symlinks_*' -exec grep -l 'usr/bin/git$' {} + 2>/dev/null)" ]; then git_line="included"; fi
+                if [ -n "$(find dl -path '*/raw/*' -name 'term_bash_symlinks_*' -exec grep -l 'usr/bin/python3' {} + 2>/dev/null)" ]; then py_line="included"; fi
+              fi
+              ;;
+          esac
+          if [ "$BUILD_TYPE" = release ]; then
+            signing="signed with the project's release key"
+          else
+            signing="**debug key** (changes with every build: uninstall the previous DroidVim before installing this one)"
+          fi
+          {
+            echo "## DroidVim ${version%%-vim*} with Vim $VIM_VERSION"
+            echo ""
+            echo "| Part | Version / source |"
+            echo "| --- | --- |"
+            echo "| Vim | $VIM_VERSION$([ "$ENABLE_LUA" = true ] && echo ", with Lua")$([ "$ENABLE_NLS" = true ] && echo ", with translations") |"
+            echo "| grep, diff, ctags | $tools |"
+            echo "| bash, zip/unzip, busybox, proot, am | $termux |"
+            echo "| git | $git_line |"
+            echo "| Python 3 + pip | $py_line |"
+            echo "| Signing | $signing |"
+            echo "| Built from | [\`${GITHUB_SHA:0:12}\`]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/commit/$GITHUB_SHA) in [run $GITHUB_RUN_ID]($run_url) |"
+            echo ""
+            echo "### Installing"
+            echo ""
+            echo "- Download \`$apk\` below and open it on your device (allow installing from this source when asked)."
+            echo "- Vim, grep, diff and ctags run on Android 5.0 and newer; bash, git, Python and the other shell tools need Android 7.0 or newer."
+            echo "- SHA-256 checksum: \`$(cut -d' ' -f1 release/SHA256SUMS.txt)\` (also in \`SHA256SUMS.txt\`)."
+          } > release/notes.md
+          cat release/notes.md
+
+      - uses: actions/upload-artifact@v4
+        if: env.RELEASE != 'none'
+        with:
+          name: release-files
+          path: release
+          retention-days: 1
+
+  # ---------------------------------------------------------------------------
+  # 7. Publish the APK on the Releases page (when requested, or for a tag).
+  # ---------------------------------------------------------------------------
+  release:
+    needs: [prepare-source, apk]
+    if: >-
+      !cancelled() &&
+      needs.apk.result == 'success' &&
+      needs.prepare-source.outputs.release != 'none'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.apk.outputs.tag }}
+      TITLE: ${{ needs.apk.outputs.title }}
+      RELEASE: ${{ needs.prepare-source.outputs.release }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-files
+          path: release
+
+      - name: Publish release ${{ needs.apk.outputs.tag }}
+        run: |
+          set -euo pipefail
+          prerelease=false
+          if [ "$RELEASE" = prerelease ]; then prerelease=true; fi
+          files=(release/*.apk release/SHA256SUMS.txt)
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # A re-run, or a release made by hand for this tag: update it.
+            gh release upload "$TAG" "${files[@]}" --clobber
+            gh release edit "$TAG" --title "$TITLE" --notes-file release/notes.md --prerelease="$prerelease"
+          else
+            # Creates the tag at the built commit if it doesn't exist yet.
+            gh release create "$TAG" "${files[@]}" --target "$GITHUB_SHA" \
+              --title "$TITLE" --notes-file release/notes.md --prerelease="$prerelease"
+          fi
+          url=$(gh release view "$TAG" --json url --jq .url)
+          echo "::notice::Published $url"
+          echo "Published [$TITLE]($url)" >> "$GITHUB_STEP_SUMMARY"
