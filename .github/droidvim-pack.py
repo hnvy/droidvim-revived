@@ -164,8 +164,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--debs", required=True, help="directory with .deb files")
-    ap.add_argument("--abi", required=True, help="Android ABI, e.g. arm64-v8a")
-    ap.add_argument("--arch", required=True,
+    ap.add_argument("--abi", help="Android ABI, e.g. arm64-v8a")
+    ap.add_argument("--arch",
                     help="DroidVim arch name used in raw resources (arm64, arm, x86_64, x86)")
     ap.add_argument("--package", default="com.droidvim", help="app package name")
     ap.add_argument("--out", help="output directory")
@@ -183,8 +183,9 @@ def main():
                 os.remove(path)
                 print(f"removed {deb}")
         return
-    if not args.out:
-        sys.exit("--out is required")
+    missing = [f"--{name}" for name in ("abi", "arch", "out") if not getattr(args, name)]
+    if missing:
+        ap.error(f"the following arguments are required unless --prune is given: {', '.join(missing)}")
 
     work = tempfile.mkdtemp(prefix="droidvim-pack-")
     # bundle -> {rel: (abs_path, kind, link)}
