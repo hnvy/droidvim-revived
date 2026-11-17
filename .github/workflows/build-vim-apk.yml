@@ -133,7 +133,7 @@ env:
   # and options).
   DEPS_CACHE_REV: '2'
   # The same for the cached Termux tools.
-  TERMUX_CACHE_REV: '2'
+  TERMUX_CACHE_REV: '3'
   # Command-line tools: 'latest' looks up the newest release at build time.
   GREP_VERSION: latest
   DIFFUTILS_VERSION: latest
@@ -192,7 +192,7 @@ jobs:
           # Runs that built a complete set of Termux tools (all ABIs, nothing
           # skipped) upload a marker artifact named after the git/Python
           # choice; reuse looks for that.
-          marker="termux-info-git${WITH_GIT}-py${WITH_PYTHON}"
+          marker="termux-info-v2-git${WITH_GIT}-py${WITH_PYTHON}"
           # has_payload <run id>: does that run still have all four payloads?
           has_payload() {
             local names abi
@@ -821,7 +821,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: payload-out
-          key: termux-payload-${{ matrix.abi }}-${{ steps.tp.outputs.sha }}-${{ env.DROIDVIM_PACKAGE }}-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}-${{ hashFiles('droidvim/.github/droidvim-pack.py') }}-r${{ env.TERMUX_CACHE_REV }}
+          key: termux-debs-${{ matrix.abi }}-${{ steps.tp.outputs.sha }}-${{ env.DROIDVIM_PACKAGE }}-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}-r${{ env.TERMUX_CACHE_REV }}
 
       - name: Free disk space for the Termux build container
         if: steps.cache.outputs.cache-hit != 'true'
@@ -896,12 +896,16 @@ jobs:
           fi
           ls -l output
 
-      - name: Repackage for DroidVim
+      - name: Collect the built packages
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          python3 droidvim/.github/droidvim-pack.py --debs termux-packages/output \
-            --abi "$ABI" --arch "$DV_ARCH" --package "$DROIDVIM_PACKAGE" --out payload-out
+          # The payload is the Termux packages themselves; the APK job turns
+          # them into DroidVim's format, so fixes to .github/droidvim-pack.py
+          # also apply to reused payloads without rebuilding.
+          mkdir -p payload-out/debs
+          cp termux-packages/output/*.deb payload-out/debs/
+          python3 droidvim/.github/droidvim-pack.py --debs payload-out/debs --prune
           # Record what was built, for runs that reuse this payload.
           jq -n --arg abi "$ABI" --arg ref "$TERMUX_PACKAGES_REF" --arg sha "${{ steps.tp.outputs.sha }}" \
                 --argjson git "$WITH_GIT" --argjson python "$WITH_PYTHON" \
@@ -911,7 +915,13 @@ jobs:
                   git: $git, python: $python, partial: $partial, built_in_run: $run, built_at: $built}' \
             > payload-out/info.json
           cat payload-out/info.json
-          find payload-out -type f | sort
+          du -sh payload-out/debs
+          ls payload-out/debs
+
+      - name: Check that the packages convert cleanly
+        run: |
+          python3 droidvim/.github/droidvim-pack.py --debs payload-out/debs \
+            --abi "$ABI" --arch "$DV_ARCH" --package "$DROIDVIM_PACKAGE" --out "$RUNNER_TEMP/packed"
 
       - name: Save payload to cache
         if: steps.cache.outputs.cache-hit != 'true' && env.PARTIAL != 'true'
@@ -974,7 +984,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.check.outputs.complete == 'true'
         with:
-          name: termux-info-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}
+          name: termux-info-v2-git${{ env.WITH_GIT }}-py${{ env.WITH_PYTHON }}
           path: termux-info.json
 
   # ---------------------------------------------------------------------------
@@ -1044,9 +1054,9 @@ jobs:
             if [ ! -d "dl/termux-payload-$abi" ]; then
               echo "::error::The Termux tools for $abi are missing"; exit 1
             fi
-            if [ ! -f "$info" ]; then
-              echo "::notice::$abi: these Termux tools were built by an older version of this workflow (no build information)"
-              continue
+            if [ ! -d "dl/termux-payload-$abi/debs" ]; then
+              echo "::error::The Termux tools of run $TERMUX_RUN_ID were stored by an older version of this workflow and can't be reused. Run once with termux_tools=build."
+              exit 1
             fi
             jq -r '"\(.abi): termux-packages \(.termux_packages_ref) @ \(.termux_packages_commit[0:12]), git=\(.git), python=\(.python), partial=\(.partial), built \(.built_at) in run \(.built_in_run)"' "$info"
             if [ "$(jq -r .partial "$info")" = true ]; then
@@ -1058,6 +1068,19 @@ jobs:
                 echo "::warning::$abi: the reused tools were built with $tool=$(jq -r ".$tool" "$info"), not ${!want} as requested"
               fi
             done
+          done
+
+      - name: Convert the Termux tools into DroidVim's format
+        if: env.TERMUX_MODE != 'repo'
+        run: |
+          set -euo pipefail
+          declare -A arch=([arm64-v8a]=arm64 [armeabi-v7a]=arm [x86_64]=x86_64 [x86]=x86)
+          for abi in "${!arch[@]}"; do
+            echo "::group::$abi"
+            python3 .github/droidvim-pack.py --debs "dl/termux-payload-$abi/debs" \
+              --abi "$abi" --arch "${arch[$abi]}" --package "$DROIDVIM_PACKAGE" \
+              --out "dl/termux-packed-$abi"
+            echo "::endgroup::"
           done
 
       - name: Install the built files into the DroidVim source tree
@@ -1119,8 +1142,8 @@ jobs:
           echo "::endgroup::"
 
           echo "::group::Termux-built tools"
-          for dir in dl/termux-payload-*; do
-            abi=${dir#dl/termux-payload-}
+          for dir in dl/termux-packed-*; do
+            abi=${dir#dl/termux-packed-}
             # Replace each bundle as a whole; the number of files changes
             # between versions.
             for bdir in "$dir"/bundles/*; do

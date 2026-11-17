@@ -119,6 +119,28 @@ def route(pkg, rel):
     return [("bundle", "term-bash")]
 
 
+def resolve_link(rel, entries, package):
+    """Follow a symlink inside a bundle to the usr/... path it ends at.
+
+    Returns None when the chain leaves the bundle or is too long.
+    """
+    prefix = f"/data/data/{package}/files/"
+    seen = 0
+    while seen < 20:
+        entry = entries.get(rel)
+        if entry is None or entry[1] != "symlink":
+            return rel if entry is not None else None
+        link = entry[2]
+        if link.startswith(prefix):
+            rel = link[len(prefix):]
+        elif link.startswith("/"):
+            return None
+        else:
+            rel = os.path.normpath(os.path.join(os.path.dirname(rel), link))
+        seen += 1
+    return None
+
+
 def add_tar_entry(tar, rel, src=None, *, kind, link=None, data=None):
     info = tarfile.TarInfo("./" + rel)
     info.uid = info.gid = 0
@@ -146,12 +168,23 @@ def main():
     ap.add_argument("--arch", required=True,
                     help="DroidVim arch name used in raw resources (arm64, arm, x86_64, x86)")
     ap.add_argument("--package", default="com.droidvim", help="app package name")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", help="output directory")
+    ap.add_argument("--prune", action="store_true",
+                    help="only delete the .deb files of packages DroidVim doesn't ship, then exit")
     args = ap.parse_args()
 
     debs = sorted(f for f in os.listdir(args.debs) if f.endswith(".deb"))
     if not debs:
         sys.exit(f"no .deb files in {args.debs}")
+    if args.prune:
+        for deb in debs:
+            path = os.path.join(args.debs, deb)
+            if SKIP.search(deb_field(path, "Package")):
+                os.remove(path)
+                print(f"removed {deb}")
+        return
+    if not args.out:
+        sys.exit("--out is required")
 
     work = tempfile.mkdtemp(prefix="droidvim-pack-")
     # bundle -> {rel: (abs_path, kind, link)}
@@ -192,13 +225,13 @@ def main():
                     else:
                         bundles.setdefault(target[1], {})[rel] = (full, kind, link)
 
-    # proot looks for its loader under usr/libexec/proot; point that at the
-    # copies the app links into $APPFILES/bin.
+    # proot looks for its loader under usr/libexec/proot; link the app's
+    # libloader*.so there as well.
     if any(lib == "libloader.so" for _, lib, _ in singles):
         tb = bundles.setdefault("term-bash", {})
-        tb["usr/libexec/proot/loader"] = (None, "symlink", "../../../bin/loader")
+        tb["usr/libexec/proot/loader"] = (None, "alias", "libloader.so")
         if any(lib == "libloader-m32.so" for _, lib, _ in singles):
-            tb["usr/libexec/proot/loader32"] = (None, "symlink", "../../../bin/loader-m32")
+            tb["usr/libexec/proot/loader32"] = (None, "alias", "libloader-m32.so")
 
     if "usr/etc/bash.bashrc" in bundles.get("term-bash", {}):
         bundles["term-bash"]["usr/etc/bash.bashrc"] = (None, "data", BASHRC)
@@ -210,7 +243,8 @@ def main():
         if "usr/bin/pager" not in tb and "usr/bin/less" in tb:
             tb["usr/bin/pager"] = (None, "symlink", "less")
         if "usr/bin/editor" not in tb:
-            tb["usr/bin/editor"] = (None, "symlink", "../../bin/vim")
+            # $APPFILES/bin/vim is the app's libsrc.vim.default.so.
+            tb["usr/bin/editor"] = (None, "alias", "libsrc.vim.default.so")
 
     provided = set()
     elf_files = []
@@ -239,13 +273,36 @@ def main():
                 rest.append(rel)
 
         lines = []
+        lib_of = {}
         for i, rel in enumerate(chunks):
             lib = f"lib{bundle}{i:05d}.so"
+            lib_of[rel] = lib
             shutil.copyfile(entries[rel][0], os.path.join(outdir, lib))
             lines.append(f"{lib}|{rel}")
             if is_elf(entries[rel][0]):
                 elf_files.append((rel, entries[rel][0]))
                 provided.add(os.path.basename(rel))
+
+        # Links to executables and libraries (libreadline.so.8 ->
+        # libreadline.so.8.3, python3 -> python3.13, git's dashed commands)
+        # are listed as extra names of the same .so file instead of being
+        # stored as links in the archive. The app unpacks the archive before
+        # it links the .so files into place, and its built-in unpacker (used
+        # whenever busybox can't run yet, e.g. on first install) skips links
+        # whose target doesn't exist at that moment.
+        kept = []
+        for rel in rest:
+            full, kind, link = entries[rel]
+            if kind == "alias":  # another name for one of the app's own libs
+                lines.append(f"{link}|{rel}")
+                continue
+            target = resolve_link(rel, entries, args.package) if kind == "symlink" else None
+            if target in lib_of:
+                lines.append(f"{lib_of[target]}|{rel}")
+                provided.add(os.path.basename(rel))
+            else:
+                kept.append(rel)
+        rest = kept
 
         dirs = set()
         for rel in chunks + rest:
