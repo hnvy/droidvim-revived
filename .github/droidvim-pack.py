@@ -36,9 +36,11 @@ LIB_ONLY = ("pcre2", "libandroid-selinux", "libtalloc", "libandroid-shmem")
 
 # Packages not shipped at all: static libraries, GUI parts that need X11/Tk,
 # git's Perl-based svn bridge, pip wheels for ensurepip (pip itself is
-# shipped as python-pip), and Tcl, which is only needed to build SQLite.
+# shipped as python-pip), Tcl, which is only needed to build SQLite, and the
+# CA certificates as a Java keystore (DroidVim has no Java runtime).
 SKIP = re.compile(r"-static$|^python-tkinter$|^python-ensurepip-wheels$"
-                  r"|^git-(gui|gitk|svn)$|^gitk$|^tcl$|^libsqlite-tcl$")
+                  r"|^git-(gui|gitk|svn)$|^gitk$|^tcl$|^libsqlite-tcl$"
+                  r"|^ca-certificates-java$")
 
 # Paths never shipped (docs, headers, static libs, terminfo which the app
 # installs from its own terminfo_min resource, ...).

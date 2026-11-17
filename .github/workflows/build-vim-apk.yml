@@ -918,6 +918,27 @@ jobs:
           du -sh payload-out/debs
           ls payload-out/debs
 
+      # Runs after a cache restore too: older cached payloads may still have
+      # such names.
+      - name: Make package file names valid for artifacts
+        run: |
+          set -euo pipefail
+          # Debian versions can have an epoch ("1:2026.11.05-1"), which ends
+          # up in the file name, but artifacts don't allow : " < > | * ?
+          # The converter reads each package's name from its contents, so
+          # the file names don't matter.
+          for f in payload-out/debs/*.deb; do
+            base=$(basename "$f")
+            safe=$(printf '%s' "$base" | tr ':"<>|*?' '_______')
+            if [ "$safe" != "$base" ]; then
+              if [ -e "payload-out/debs/$safe" ]; then
+                echo "::error::Can't rename $base: $safe already exists"; exit 1
+              fi
+              mv "$f" "payload-out/debs/$safe"
+              echo "Renamed $base -> $safe"
+            fi
+          done
+
       - name: Check that the packages convert cleanly
         run: |
           python3 droidvim/.github/droidvim-pack.py --debs payload-out/debs \
