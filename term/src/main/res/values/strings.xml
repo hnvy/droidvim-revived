@@ -150,7 +150,7 @@
     <string name="title_license">Open source licenses</string>
     <string name="license_text">This software includes the work that is distributed in the Apache License 2.0.\n\n・Apache Commons\n・Terminal Emulator for Android\n・Termux\n・TermuxAm\n\n\nThis software is an open source project.</string>
     <string name="github">github</string>
-    <string name="github_url">https://github.com/shiftrot/droidvim</string>
+    <string name="github_url">https://github.com/hnvy/droidvim-revived</string>
 
     <string name="screen_preferences">Screen</string>
 
