@@ -1,0 +1,440 @@
+<!--?xml version="1.0" encoding="utf-8"?-->
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="ja" lang="ja"><head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+<meta http-equiv="Content-Script-Type" content="text/javascript">
+<meta http-equiv="Content-Style-Type" content="text/css">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="md2html">
+<meta name="description" content="D:/sync/Dropbox/Public/DroidVim-Hosting/public/src/droidvim-en.txt">
+<title> DroidVim (Text Editor) </title>
+<link rel="stylesheet" type="text/css" href="DroidVim%20(Text%20Editor)%20Help%20Pages_files/md2html_egHU.css">
+</head>
+<body class="mainIndex single">
+<div id="header"><p class="siteName"><a href="" title="Toplink">Md2html</a></p><p class="description">D:/sync/Dropbox/Public/DroidVim-Hosting/public/src/droidvim-en.txt</p></div>
+<div id="content"><div id="main">
+<div id="utilities">
+<dl class="navi">
+<dt>Entries</dt><dd><ul>
+<li><a href="#t1" title="t1"> DroidVim (Text Editor)</a></li>
+<li><a href="#t2" title="t2"> Note: </a></li>
+<li><a href="#t3" title="t3"> Troubleshooting: </a></li>
+<li><a href="#t4" title="t4"> Storage access</a></li>
+<li><a href="#t5" title="t5"> Vimfiles and Home directory </a></li>
+<li><a href="#t6" title="t6"> Tips: </a></li>
+<li><a href="#t7" title="t7"> Text input mode</a></li>
+<li><a href="#t8" title="t8"> Extra contents (in-app purchase):</a></li>
+<li><a href="#t9" title="t9"> Network permissions </a></li>
+<li><a href="#t10" title="t10"> Source code:</a></li>
+<li><a href="#t11" title="t11"> Contact: </a></li>
+<li><a href="#t12" title="t12"> Privacy policy</a></li>
+</ul></dd>
+</dl>
+</div></div>
+<div class="section entry" id="e1"><h1><a href="#t1" title="t1" name="t1" id="t1">■ DroidVim (Text Editor)</a></h1>
+<div class="textBody">
+DroidVim is a Vim for Android.<br>
+Vim (Huge version), grep, diff and ctags are ready to use.<br>
+<a href="https://play.google.com/store/apps/details?id=com.droidvim">https://play.google.com/store/apps/details?id=com.droidvim</a>
+</div></div>
+<div class="section entry" id="e2"><h1><a href="#t2" title="t2" name="t2" id="t2">■ Note: </a><a name="note"></a></h1>
+<div class="textBody">
+<h2 id="j20"><a href="#h20" title="h20" name="h20" id="h20">■</a> How to quit:</h2>
+<ul><li> Type ":qa" command
+</li><li> "Double tap" &gt; "QUIT"
+</li><li> "📲" button
+</li></ul>
+<br>
+<h2 id="j21"><a href="#h21" title="h21" name="h21" id="h21">■</a> Vim tutorial:</h2>
+<ul><li> Type ":Vimtutor"
+</li><li> "Long press menu" &gt; "Vim tutorial"
+</li></ul>
+</div></div>
+<div class="section entry" id="e3"><h1><a href="#t3" title="t3" name="t3" id="t3">■ Troubleshooting: </a><a name="trouble"></a></h1>
+<div class="textBody">
+<ul><li> If Vim freezes, use "Close window" on the long press menu.
+</li><li> DroidVim is terminated by itself in the background.
+<br> &nbsp; &nbsp;On some devices, DroidVim running in the background may be terminated by itself because the power saving mechanism is not properly implemented.
+<br> &nbsp; &nbsp;In this case, please turn off "Battery optimization" of DroidVim. ("Preference" &gt; "App settings" &gt; "Ignore Battery optimization")
+</li><li> If Git/Python cannot be run from the shell, try the following
+<br> &nbsp; &nbsp;- Reinstall (overwrite) Git/Python
+<br> &nbsp; &nbsp;- Enable proot (Preferences &gt; Shell &gt; Proot)
+</li></ul>
+<br>
+<h2 id="j30"><a href="#h30" title="h30" name="h30" id="h30">■</a> long lines slow down display</h2>
+Vim slows down the display of long lines.<br>
+However, if there are many parentheses, such as html or json, the <code>matchparen</code> may slow down the display even if the lines are not that long.<br>
+In that case, try adding either of the following to your .vimrc.<br>
+<code><pre class="vim"><div id="vimCodeElement">
+<span class="Comment">" `matchparen_timeout` to be smaller (default is 300).</span>
+<span class="Comment">" or make `synmaxcol` smaller (`:h matchparen`)</span>
+<span class="Statement">let</span>&nbsp;<span class="Identifier">g:matchparen_timeout</span><span class="Statement">=</span><span class="Constant">10</span>
+</div>
+
+</pre></code>
+<br>
+<code><pre class="vim"><div id="vimCodeElement">
+<span class="Comment">"</span>&nbsp;<span class="PreProc">Note:</span><span class="Comment">&nbsp;updatetime is global (`:h updatetime`).</span>
+<span class="Statement">set</span>&nbsp;<span class="PreProc">updatetime</span>=300
+<span class="Statement">augroup</span>&nbsp;matchparenlight
+&nbsp;&nbsp;<span class="Statement">au</span>!&nbsp;<span class="Type">CursorMoved</span>&nbsp;*&nbsp;<span class="Statement">let</span>&nbsp;<span class="Identifier">g:matchparen_timeout</span><span class="Statement">=</span><span class="Constant">1</span>
+&nbsp;&nbsp;<span class="Statement">au</span>!&nbsp;<span class="Type">CursorHold</span>&nbsp;&nbsp;*&nbsp;<span class="Statement">let</span>&nbsp;<span class="Identifier">g:matchparen_timeout</span><span class="Statement">=</span><span class="Constant">300</span>|<span class="Statement">doau</span>&nbsp;matchparen&nbsp;CursorMoved
+<span class="Statement">augroup</span>&nbsp;END
+</div>
+
+</pre></code>
+<br>
+<h2 id="j31"><a href="#h31" title="h31" name="h31" id="h31">■</a> Screen glitches <a name="screen-glitch"></a></h2>
+Vim and terminal can not handle "proportional fonts". Please use "monospaced fonts".<br>
+"Preferences &gt; Font &gt; Font file"<br>
+<dl><dt> monospaced fonts </dt><dd> All character widths must be the same or double (fixed-width). For example, 'i' and 'W' must have the same character width.
+</dd></dl>
+For example, try "Roboto-Mono" via followings.<br>
+<a href="https://fonts.google.com/knowledge/glossary/monospaced">https://fonts.google.com/knowledge/glossary/monospaced</a> <br>
+<a href="https://fonts.google.com/specimen/Roboto+Mono">https://fonts.google.com/specimen/Roboto+Mono</a> <br>
+</div></div>
+<div class="section entry" id="e4"><h1><a href="#t4" title="t4" name="t4" id="t4">■ Storage access</a><a name="storage"></a></h1>
+<div class="textBody">
+Vim has direct access to the Android file system via shell.<br>
+Therefore, to edit files with Vim, it is necessary to understand the file system and security of Android.<br>
+<br>
+<dl><dt> Internal Storage </dt><dd> Built-in storage within the Android device.
+</dd><dt> App-specific Storage </dt><dd> Store files only for internal processing by the app.
+<br> &nbsp; &nbsp;Android apps run in the <a href="https://source.android.com/security/app-sandbox">sandbox</a>. Files in the sandbox cannot be accessed by other apps.
+<br> &nbsp; &nbsp;This storage can be handled in much the same way as a general Linux file system. The DroidVim's "Home directory ($HOME)" is located in this area.
+<br> &nbsp; &nbsp;Android 7 and later, You can use "File Manager" button (Drawer menu) to copy files to the DroidVim's "HOME directory".
+</dd><dt> External Storage </dt><dd> External SD card, USB memory, various cloud storages.
+<br> &nbsp; &nbsp;Shell does not have direct access to this area.
+</dd></dl>
+<ul><li> Use the "Storage" button to edit / create files in storage that is not directly accessible via shell.
+</li><li> DroidVim may create a cache file and edit the cache file when accessing external storages.
+</li></ul>
+<br>
+<h2 id="j40"><a href="#h40" title="h40" name="h40" id="h40">■</a> $INTERNAL_STORAGE (Internal storage) <a name="internalStorage"></a></h2>
+You can access to the internal storage via shell with <code>$INTERNAL_STORAGE</code>.<br>
+You can also use <code>$APPEXTFILES</code> to access <code>[Internal storage]/Android/data/com.droidvim/files</code>.<br>
+<br>
+<pre>:e $INTERNAL_STORAGE
+</pre>
+ * There is a symbolic link in Home directory. ([Home directory]/internalStorage)<br>
+ &nbsp; Symbolic links can be re-created using "Drawer Menu→Storage→Symbolic Links".<br>
+<br>
+Use <code>echo</code> to display the path.<br>
+<pre>:echo $INTERNAL_STORAGE
+</pre>
+Internal storage (<code>$INTERNAL_STORAGE</code>) can be accessed by other applications.<br>
+In most cases, You can access the internal storage directly as <code>/sdcard</code> or <code>/storage/emulated/0</code>.<br>
+Storage permission is required for direct access.<br>
+</div></div>
+<div class="section entry" id="e5"><h1><a href="#t5" title="t5" name="t5" id="t5">■ Vimfiles and Home directory </a><a name="vimfiles"></a></h1>
+<div class="textBody">
+Please read "<a href="#storage" title="storage">Storage access</a>" first.<br>
+<br>
+If you want to change Vim settings, create Vimfiles (.vimrc, .vim) in the Home directory (<code>$HOME</code>).<br>
+You can also edit .vimrc with "Long press menu -&gt; Edit .vimrc".<br>
+<table><tbody><tr><td> .vimrc &nbsp; &nbsp; &nbsp; &nbsp;</td><td> configuration file &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td><td> :h vimrc &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td></tr>
+<tr><td> .vim/autoload </td><td> automatically loaded scripts </td><td> :h autoload-functions &nbsp; &nbsp;</td></tr>
+<tr><td> .vim/colors &nbsp; </td><td> color scheme files &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td><td> :h colorscheme &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td></tr>
+<tr><td> .vim/doc &nbsp; &nbsp; &nbsp;</td><td> documentation &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td><td> :h write-local-help &nbsp; &nbsp; &nbsp;</td></tr>
+<tr><td> .vim/ftplugin </td><td> filetype plugins &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td><td> :h write-filetype-plugin </td></tr>
+<tr><td> .vim/pack &nbsp; &nbsp; </td><td> packages &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td><td> :h packadd &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td></tr>
+<tr><td> .vim/plugin &nbsp; </td><td> plugin scripts &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td><td> :h write-plugin &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td></tr>
+<tr><td> .vim/syntax &nbsp; </td><td> syntax files &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td><td> :h mysyntaxfile &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td></tr>
+</tbody></table>
+<br>
+You can create directories and copy files with commands via Vim.<br>
+<ol><li> :!mkdir -p $HOME/.vim/colors
+</li><li> :!cp /path/to/your_colorscheme.vim $HOME/.vim/colors
+</li></ol>
+<br>
+There are several more convenient ways to copy files to DroidVim's "HOME directory".<br>
+<br>
+<strong> !!! IMPORTANT !!! </strong><br>
+<ul><li> Uninstalling DroidVim will delete all files in <code>$HOME</code>.
+</li></ul>
+Please backup your files regularly.<br>
+<br>
+<h2 id="j50"><a href="#h50" title="h50" name="h50" id="h50">■</a> File manager<a name="android_r"></a></h2>
+ &nbsp;<em>"Android 7 and later"</em><br>
+<br>
+You can use "File Manager" button (Drawer menu) to copy the files.<br>
+You can also use a file manager app that supports Android Storage Access Framework.<br>
+<br>
+<h2 id="j51"><a href="#h51" title="h51" name="h51" id="h51">■</a> Vimfiles location<a name="vimfiles_location"></a></h2>
+You can use Vimfiles (<code>.vimrc</code> or <code>.vim)</code> in internal storage.<br>
+"<a href="#internalStorage" title="internalStorage">$INTERNAL_STORAGE</a>"<br>
+<br>
+<h3 id="j52"><a href="#h52" title="h52" name="h52" id="h52">■</a> $VIM</h3>
+You can change the location of Vimfiles by setting the environment variable <code>$VIM</code>. (<code>:h $VIM</code>)<br>
+<br>
+"Preferences &gt; Shell &gt; Initial commands"<br>
+<code><pre class="sh"><div id="vimCodeElement">
+<span class="Constant">export VIM=$INTERNAL_STORAGE/path/to/vimfiles</span>
+<span class="Constant">bash</span>
+<span class="Constant">-vim.app</span>
+</div>
+
+</pre></code>
+<br>
+<h3 id="j53"><a href="#h53" title="h53" name="h53" id="h53">■</a> Symbolic link</h3>
+Symbolic link:<br>
+<ol><li> :!rm $HOME/.vimrc
+<br> &nbsp; &nbsp;(Delete $HOME/.vimrc)
+</li><li> :!ln -s $INTERNAL_STORAGE/path/to/.vimrc $HOME/.vimrc
+</li><li> :!rm -rf $HOME/.vim
+<br> &nbsp; &nbsp;(Delete $HOME/.vim)
+</li><li> :!ln -s $INTERNAL_STORAGE/path/to/.vim $HOME/.vim
+</li></ol>
+<br>
+<h2 id="j54"><a href="#h54" title="h54" name="h54" id="h54">■</a> Backup/Restore</h2>
+You can backup or restore the files in the home directory (<code>$HOME</code>) by using Backup/Restore command.<br>
+ &nbsp;"Drawer Menu &gt; Storage &gt; Backup/Restore"<br>
+<br>
+Backup/Restore has the following restrictions.<br>
+<ul><li> Backup/Restore only copies files with new timestamp.
+</li><li> Backup/Restore does not copy symbolic links.
+</li><li> No mirroring.
+</li></ul>
+</div></div>
+<div class="section entry" id="e6"><h1><a href="#t6" title="t6" name="t6" id="t6">■ Tips: </a><a name="tips"></a></h1>
+<div class="textBody">
+<h2 id="j60"><a href="#h60" title="h60" name="h60" id="h60">■</a> Move the cursor</h2>
+<ul><li> Swipe left or right in the lower half of the screen to move the cursor to the left or right
+</li><li> The [○] button swaps the top/bottom, left/right directions.
+<br> &nbsp; &nbsp;It also synchronizes with the state of the [Ctrl] button. ([ESC] button to cancel)
+</li></ul>
+<br>
+<h2 id="j61"><a href="#h61" title="h61" name="h61" id="h61">■</a> HTML and Link.<a name="html"></a></h2>
+<ul><li> Open the URL under the cursor.
+<br> &nbsp; &nbsp;- gx (:h gx)
+</li><li> Open HTML file in browser.
+<br> &nbsp; &nbsp;- "Menu" -&gt; "Share" -&gt; \"File\"
+<br> &nbsp; &nbsp;- Type <code>:ShareIntent file</code>
+</li></ul>
+<br>
+<h2 id="j62"><a href="#h62" title="h62" name="h62" id="h62">■</a> Colorscheme</h2>
+DroidVim supports a 256 color terminal scheme.<br>
+<pre>:colorscheme term256
+</pre>
+"<a href="#vimfiles" title="vimfiles">Vimfiles</a>"<br>
+<br>
+<h2 id="j63"><a href="#h63" title="h63" name="h63" id="h63">■</a> Plugins</h2>
+"<a href="#vimfiles" title="vimfiles">Vimfiles</a>"<br>
+You can install the VimScript plugin to "$HOME/.vim/plugin" directory.<br>
+See followings:<br>
+<ul><li> <code>:h plugin</code>
+</li><li> <code>:h runtimepath</code>.
+</li></ul>
+You can also use <code>packadd</code>. ("$HOME/.vim/packadd")<br>
+<ul><li> <code>:h packages</code>.
+</li></ul>
+<br>
+<h2 id="j64"><a href="#h64" title="h64" name="h64" id="h64">■</a> Windows/samba</h2>
+If you want to edit the file shared by Windows/samba, try using the following application. (Android 8 and later)<br>
+<ul><li> <a href="https://github.com/fuenor/smb-documents-provider/releases">SMB Documents Provider</a>
+</li></ul>
+<br>
+<h2 id="j65"><a href="#h65" title="h65" name="h65" id="h65">■</a> zip, tar</h2>
+Zip and tar files can be extracted using <code>unzip</code> or <code>busybox tar</code>.<br>
+<h2 id="j66"><a href="#h66" title="h66" name="h66" id="h66">■</a> shell script</h2>
+If you want to run a shell script in the home directory on Android 10 or later, enable "Preference &gt; shell &gt; proot".<br>
+<br>
+<h2 id="j67"><a href="#h67" title="h67" name="h67" id="h67">■</a> root</h2>
+Since DroidVim is running on the terminal emulator, root access is possible by installing the <code>su</code> command.<br>
+In a rooted environment, the <code>vi</code> command should also be available. We recommended using <code>vi</code> with <code>shell</code> or<code> Ctrl+z</code>.<br>
+<ol><li> <code>:shell</code> or <code>Ctrl-Z</code>
+</li><li> <code>su</code>
+</li><li> <code>vi</code>
+</li></ol>
+<br>
+You can also use DroidVim's vim binary by running the <code>suvim</code> command.<br>
+<ol><li> <code>:shell</code> or <code>Ctrl-Z</code>
+</li><li> <code>suvim</code>
+</li><li> use <code>exit</code> to exit root
+</li></ol>
+<br>
+<h3 id="j68"><a href="#h68" title="h68" name="h68" id="h68">■</a> Android 10 and later</h3>
+If you get an error with the <code>su</code> command, execute <code>:TerminalMode</code> on Vim.<br>
+When you restart DroidVim, DroidVim will start up in "Terminal emulator mode", so execute <code>su</code> or <code>suvim</code>.<br>
+If you have problems with bash, use <code>:TerminalMode sh</code>.<br>
+When you exit DroidVim, DroidVim will start up in "normal mode".<br>
+You can also use it by turning off [Settings] &gt; [Shell] &gt; [proot].<br>
+</div></div>
+<div class="section entry" id="e7"><h1><a href="#t7" title="t7" name="t7" id="t7">■ Text input mode</a><a name="imctrl"></a></h1>
+<div class="textBody">
+By default it is set to "Direct input" (alphanumeric characters only) for normal mode commands.<br>
+Switch to the normal input by the following method.<br>
+<ul><li> "🔤" button (function bar)
+</li><li> One-line text box
+</li><li> <code>&lt;C-^&gt;</code>
+</li><li> Vim script
+</li><li> IME shortcuts
+</li></ul>
+<br>
+<h2 id="j70"><a href="#h70" title="h70" name="h70" id="h70">■</a> One-line text box<a name="one_line_text_box"></a></h2>
+When you start one-line text box (double tap at the bottom of the screen), you can use the usual input equivalent to a normal Android application.<br>
+It is convenient to change "Preferences" -&gt; "🔤 button" to "One-line text box".<br>
+<br>
+<h2 id="j71"><a href="#h71" title="h71" name="h71" id="h71">■</a> Vim Script(control via Vim)</h2>
+If you want to switch to the normal input automatically when enter the insert mode, add the following settings to your .vimrc.<br>
+<code><pre class="vim"><div id="vimCodeElement">
+<span class="Comment">" Toggle one-line text input</span>
+<span class="Statement">let</span>&nbsp;<span class="Identifier">g:imctrl_normal</span><span class="Statement">=</span><span class="Constant">56</span>
+<span class="Statement">let</span>&nbsp;<span class="Identifier">g:imctrl_insert</span><span class="Statement">=</span><span class="Constant">50</span>
+</div>
+
+</pre></code>
+<code><pre class="vim"><div id="vimCodeElement">
+<span class="Comment">" Toggle input mode</span>
+<span class="Statement">let</span>&nbsp;<span class="Identifier">g:imctrl_normal</span><span class="Statement">=</span><span class="Constant">53</span>
+<span class="Statement">let</span>&nbsp;<span class="Identifier">g:imctrl_insert</span><span class="Statement">=</span><span class="Constant">50</span>
+</div>
+
+</pre></code>
+You can also use <code>&lt;C-^&gt;</code>. (<code>:h iminsert</code> <code>:h i_CTRL-^</code>)<br>
+<br>
+<h2 id="j72"><a href="#h72" title="h72" name="h72" id="h72">■</a> Non-English language with Gboard</h2>
+If you want to input non-English language characters using <a href="https://play.google.com/store/apps/details?id=com.google.android.inputmethod.latin">Gboard</a>, try using the following settings.<br>
+<ol><li> Set Gboard's "Language" to only two, English and the language you want to use.
+</li><li> Long press space key → Choose "English".
+</li><li> Set DroidVim's "Preferences" → "functionbar" → "🔤" button to "&lt;C-^&gt;"
+</li><li> Add the following settings to .vimrc and restart.
+</li></ol>
+<code><pre class="vim"><div id="vimCodeElement">
+<span class="Comment">" Execute&nbsp;</span><span class="Constant">"Language Switch"</span><span class="Comment">&nbsp;when the input mode is switched by `iminsert`</span>
+<span class="Statement">let</span>&nbsp;<span class="Identifier">g:imactivate_language_switch</span>&nbsp;<span class="Statement">=</span>&nbsp;<span class="Constant">61</span>
+</div>
+
+</pre></code>
+After that, use "🔤" button in insert mode to switch between alphanumeric characters and non-English language characters.<br>
+※ This method is not useful if you need more than two languages.<br>
+<br>
+If a physical keyboard is connected, use <code>&lt;C-^&gt;</code> or <code>&lt;C-6&gt;</code>. You can also use "IME shortcuts".<br>
+<ol><li> DroidVim's "Preferences" → "Text Input Mode" → Set "IME Shortcut Action" to "&lt;C-^&gt;"
+</li></ol>
+※ Unless there is a problem, do not use "[Shift] + [Space]".<br>
+<br>
+<h2 id="j73"><a href="#h73" title="h73" name="h73" id="h73">■</a> Option details</h2>
+<table><tbody><tr><td> imctrl_insert &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td><td> When entering the insert mode </td></tr>
+<tr><td> imctrl_normal &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td><td> When exiting the insert mode </td></tr>
+<tr><td> imactivate_insert &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td><td> When entering the insert mode (iminsert=2)</td></tr>
+<tr><td> imactivate_normal &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td><td> When exiting the insert mode (iminsert=2)</td></tr>
+<tr><td> imactivate_language_switch </td><td> When entering/exiting the insert mode (iminsert=2)</td></tr>
+</tbody></table>
+<br>
+The operation differs depending on the IME being used. Please set appropriately by referring to “Setting value details” in the next section.<br>
+<br>
+<h2 id="j74"><a href="#h74" title="h74" name="h74" id="h74">■</a> Setting value details<a name="imctrl_option"></a></h2>
+You can change the text input mode from Vim script.<br>
+<code><pre class="vim"><div id="vimCodeElement">
+:ATEMod&nbsp;<span class="Constant">72</span>
+</div>
+
+</pre></code>
+<br>
+<table><tbody><tr><td> 0</td><td> Do nothing </td><td></td></tr>
+<tr><td>50</td><td> Normal input</td><td></td></tr>
+<tr><td>51</td><td> Direct input : password </td><td></td></tr>
+<tr><td>52</td><td> Direct input : URI </td><td></td></tr>
+<tr><td>53</td><td> Direct input : Default </td><td></td></tr>
+<tr><td>54</td><td> Direct input : Raw </td><td></td></tr>
+<tr><td>55</td><td> Toggle "Normal input"/"Input mode at startup"</td><td> See Preferences </td></tr>
+<tr><td>56</td><td> One-line text box </td><td></td></tr>
+<tr><td>61</td><td> Language switch (Shift+Space) </td><td> If you are using IME for which "language switch" command is not enabled, the same process as pressing the space key is performed. </td></tr>
+<tr><td>62</td><td> Language switch (Alt+Space) </td><td> &nbsp;If you are using IME for which "language switch" command is not enabled, the same process as pressing the space key is performed. </td></tr>
+<tr><td>63</td><td> &lt;C-^&gt; </td><td> For iminsert </td></tr>
+<tr><td>70</td><td> Hide softkeyboard </td><td></td></tr>
+<tr><td>71</td><td> Show softkeyboard </td><td></td></tr>
+<tr><td>72</td><td> Toggle Softkeyboard </td><td></td></tr>
+</tbody></table>
+<br>
+<h2 id="j75"><a href="#h75" title="h75" name="h75" id="h75">■</a> Physical keyboard</h2>
+The terminal emulator can also control the input mode.<br>
+If you want to control the input mode from the physical keyboard, try setting "Preferences" → "Text input mode" → "IME shortcuts" appropriately.<br>
+<br>
+<h3 id="j76"><a href="#h76" title="h76" name="h76" id="h76">■</a> Android Shortcuts</h3>
+<table><tbody><tr><th>Layout switch &nbsp; </th><td> [Ctrl]+[Space] &nbsp;</td><td> If multiple layouts are available. </td></tr>
+<tr><th>Language switch </th><td> [Shift]+[Space] </td><td> If IME can use multiple languages. </td></tr>
+<tr><th>IME switch &nbsp; &nbsp; &nbsp;</th><td> [Meta]+[Space] &nbsp;</td><td> If multiple IMEs are available.<br>[Meta] means [Windows] key or [Command] key<br>(Android 7 and up) </td></tr>
+</tbody></table>
+</div></div>
+<div class="section entry" id="e8"><h1><a href="#t8" title="t8" name="t8" id="t8">■ Extra contents (in-app purchase):</a><a name="extra_contents"></a></h1>
+<div class="textBody">
+<h2 id="j80"><a href="#h80" title="h80" name="h80" id="h80">■</a> Extra contents</h2>
+Add the following packages required by some plugins.<br>
+<ul><li> Git, curl - Version Control System.
+</li><li> Python - Programming Language.
+</li></ul>
+Others<br>
+<ul><li> Markdown to html plugin (Experimental)
+</li></ul>
+<br>
+<h3 id="j81"><a href="#h81" title="h81" name="h81" id="h81">■</a> Donation</h3>
+With one donation, you can use extra contents on all your devices, and you do not need a donation for updates.<br>
+If you add a new device, Google Play may not yet reflect your billing status.<br>
+In that case, proceed with the flow until the "Google Play's in-app billing dialog" appears. (No need to buy)<br>
+When the "Google Play's in-app billing dialog" is displayed, Google Play will acquire the data from the server and the latest billing status will be reflected.<br>
+<br>
+<h3 id="j82"><a href="#h82" title="h82" name="h82" id="h82">■</a> python (pip)</h3>
+Python on DroidVim does not support numpy/scipy.<br>
+This is because the developer of numpy/scipy has not built the library file for Android.<br>
+<br>
+<h3 id="j83"><a href="#h83" title="h83" name="h83" id="h83">■</a> busybox-setup</h3>
+When extra contents is installed on a specific device (e.g. Samsung devices), some commands (e.g. "ls") may not work.<br>
+In such a case, please use "busybox-setup sysbin".<br>
+<ol><li> <code>:shell</code> or <code>Ctrl-z</code>
+</li><li> <code>busybox-setup sysbin</code>
+</li></ol>
+<br>
+If problems still occur, initialize and setting commands.<br>
+<br>
+<h4 id="j84"> Initialize</h4>
+<ol><li> <code>busybox-setup clean</code>
+</li><li> <code>busybox-setup</code>
+</li></ol>
+<br>
+<h4 id="j85"> Setting commands</h4>
+<ol><li> For example, if <code>ls</code> does not work, execute <code>busybox-setup sysbin ls</code> or <code>busybox-setup ls</code>.
+</li><li> If there is a command which does not work, do the same thing.
+</li></ol>
+<br>
+<table><tbody><tr><th>Option &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </th><td></td></tr>
+<tr><td> all &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td><td>Add all busybox commands. (busybox-setup all)</td></tr>
+<tr><td> {command} &nbsp; &nbsp; &nbsp; &nbsp; </td><td>Add specified busybox command. (e.g. busybox-setup ls)</td></tr>
+<tr><td> sysbin &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp;</td><td>Use all commands of your device preferentially. (busybox-setup sysbin)</td></tr>
+<tr><td> sysbin {command} &nbsp;</td><td>Use specified command of your device preferentially. (e.g. busybox-setup sysbin ls)</td></tr>
+<tr><td> clean &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; &nbsp; </td><td> Clear all additional commands. (busybox-setup clean)</td></tr>
+</tbody></table>
+If you run without options, the standard installation will be performed.<br>
+</div></div>
+<div class="section entry" id="e9"><h1><a href="#t9" title="t9" name="t9" id="t9">■ Network permissions </a><a name="permissions"></a></h1>
+<div class="textBody">
+DroidVim uses network permissions for the following purposes:<br>
+<ul><li> Extra contents
+</li><li> HTML file preview
+</li><li> Help
+</li><li> Crash report
+</li></ul>
+If you don't like it, build DroidVim yourself from source code or stop using DroidVim.<br>
+</div></div>
+<div class="section entry" id="e10"><h1><a href="#t10" title="t10" name="t10" id="t10">■ Source code:</a></h1>
+<div class="textBody">
+DroidVim is an open source project.<br>
+<a href="https://github.com/shiftrot/droidvim">https://github.com/shiftrot/droidvim</a>
+</div></div>
+<div class="section entry" id="e11"><h1><a href="#t11" title="t11" name="t11" id="t11">■ Contact: </a><a name="contacts"></a></h1>
+<div class="textBody">
+E-mail: <a href="mailto:shiftrot@gmail.com">shiftrot@gmail.com</a>
+<br>
+Contact form:<br>
+<a href="https://docs.google.com/forms/d/e/1FAIpQLSdjYF3-Vm0uJ2t5yfErvDTlmwhbMA_XKmgUGg_3LwJCKWeqPQ/viewform">https://docs.google.com/forms/d/e/1FAIpQLSdjYF3-Vm0uJ2t5yfErvDTlmwhbMA_XKmgUGg_3LwJCKWeqPQ/viewform</a>
+</div></div>
+<div class="section entry" id="e12"><h1><a href="#t12" title="t12" name="t12" id="t12">■ Privacy policy</a></h1>
+<div class="textBody">
+<a href="https://droidterm-e8a40.firebaseapp.com/droidvim/droidvim-privacy-policy.html">https://droidterm-e8a40.firebaseapp.com/droidvim/droidvim-privacy-policy.html</a>
+</div></div>
+<p class="topicPath"><a href="javascript:history.back()" title="Prev">&lt;&lt;&nbsp;Prev</a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="#header" title="PageTop">PageTop</a></p>
+</div>
+
+
+<div style="border-block-style: initial; border-inline: initial; border-end-end-radius: initial; border-end-start-radius: initial; border-start-end-radius: initial; border-start-start-radius: initial; border-block-width: initial; border-block-color: initial; overflow-block: initial; overflow-inline: initial; overscroll-behavior-block: initial; overscroll-behavior-inline: initial; margin-block: initial; margin-inline: initial; scroll-margin-block: initial; scroll-margin-inline: initial; padding-block: initial; padding-inline: initial; scroll-padding-block: initial; scroll-padding-inline: initial; contain-intrinsic-block-size: initial; contain-intrinsic-inline-size: initial; max-block-size: initial; max-inline-size: initial; inset-block: initial; inset-inline: initial; block-size: initial; inline-size: initial; min-block-size: initial; min-inline-size: initial; background: initial; background-blend-mode: initial; border: initial; box-decoration-break: initial; -moz-float-edge: initial; border-radius: initial; vertical-align: initial; backface-visibility: initial; break-inside: initial; clear: initial; contain: initial; container: initial; content-visibility: initial; float: initial; isolation: initial; -moz-orient: initial; overflow-anchor: initial; resize: initial; scroll-behavior: initial; scroll-snap-align: initial; scroll-snap-stop: initial; scroll-snap-type: initial; scrollbar-gutter: initial; touch-action: initial; transform-box: initial; transform-style: initial; appearance: initial; break-after: initial; break-before: initial; overflow: initial; overscroll-behavior: initial; anchor-name: initial; offset: initial; perspective: initial; rotate: initial; scale: initial; shape-outside: initial; transform-origin: initial; translate: initial; will-change: initial; zoom: initial; perspective-origin: initial; anchor-scope: initial; transform: initial; shape-image-threshold: initial; shape-margin: initial; column-fill: initial; column-span: initial; column-rule: initial; columns: initial; content: initial; counter-increment: initial; counter-reset: initial; counter-set: initial; mix-blend-mode: initial; backdrop-filter: initial; box-shadow: initial; clip: initial; filter: initial; opacity: initial; font: initial; font-synthesis: initial; math-shift: initial; math-style: initial; font-palette: initial; math-depth: initial; dominant-baseline: initial; image-orientation: initial; image-rendering: initial; print-color-adjust: initial; text-orientation: initial; visibility: initial; writing-mode: initial; paint-order: initial; shape-rendering: initial; stroke-linecap: initial; stroke-linejoin: initial; text-anchor: initial; color-interpolation: initial; color-interpolation-filters: initial; clip-rule: initial; fill-rule: initial; stroke-dasharray: initial; stroke-dashoffset: initial; stroke-width: initial; fill: initial; stroke: initial; fill-opacity: initial; stroke-opacity: initial; marker: initial; stroke-miterlimit: initial; border-collapse: initial; caption-side: initial; empty-cells: initial; border-spacing: initial; forced-color-adjust: initial; hyphens: initial; line-break: initial; -moz-text-size-adjust: initial; overflow-wrap: initial; ruby-align: initial; ruby-position: initial; text-align: initial; text-align-last: initial; text-autospace: initial; text-box: initial; text-combine-upright: initial; text-decoration-skip-ink: initial; text-emphasis-position: initial; text-justify: initial; text-rendering: initial; text-transform: initial; text-underline-position: initial; text-wrap: initial; -webkit-text-security: initial; white-space: initial; word-break: initial; color: initial; hyphenate-character: initial; hyphenate-limit-chars: initial; letter-spacing: initial; tab-size: initial; text-emphasis: initial; text-indent: initial; text-shadow: initial; text-underline-offset: initial; -webkit-text-stroke: initial; word-spacing: initial; -webkit-text-fill-color: initial; pointer-events: initial; accent-color: initial; caret-color: initial; color-scheme: initial; cursor: initial; scrollbar-color: initial; list-style: initial; quotes: initial; overflow-clip-margin: initial; margin: initial; scroll-margin: initial; outline: initial; outline-offset: initial; padding: initial; scroll-padding: initial; page: initial; place-items: initial; box-sizing: initial; flex-flow: initial; grid: initial; object-fit: initial; position-area: initial; position-try: initial; position-visibility: initial; place-content: initial; place-self: initial; aspect-ratio: initial; flex: initial; position-anchor: initial; object-position: initial; gap: initial; order: initial; contain-intrinsic-size: initial; grid-area: initial; max-height: initial; max-width: initial; height: initial; min-height: initial; min-width: initial; width: initial; mask-type: initial; vector-effect: initial; clip-path: initial; d: initial; mask: initial; cx: initial; cy: initial; x: initial; y: initial; flood-opacity: initial; stop-opacity: initial; r: initial; rx: initial; ry: initial; flood-color: initial; lighting-color: initial; stop-color: initial; table-layout: initial; text-decoration: initial; text-decoration-inset: initial; text-overflow: initial; field-sizing: initial; ime-mode: initial; scrollbar-width: initial; user-select: initial; -moz-force-broken-image-icon: initial; animation-composition: initial; animation: initial; scroll-timeline: initial; transition: initial; view-timeline: initial; view-transition-class: initial; view-transition-name: initial; timeline-scope: initial; -moz-box-align: initial; -moz-box-direction: initial; -moz-box-orient: initial; -moz-box-pack: initial; -moz-box-ordinal-group: initial; -moz-box-flex: initial; position: fixed; inset: 0px; z-index: 2147483647; display: none;"></div></body></html>
